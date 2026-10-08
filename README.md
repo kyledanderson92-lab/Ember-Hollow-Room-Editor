@@ -52,7 +52,7 @@ GitHub Pages serves the public `main` branch root; pushed updates redeploy autom
 
 ## Flip the entire room
 
-Use **Flip Horizontally** or **Flip Vertically** under ROOM in the left toolbar. A flip mirrors all carve/fill operations and markers within the current bounds, preserving operation order and IDs. Platform spans and complete 270-world-unit door openings are mirrored correctly. Horizontal flips swap entry/exit roles so entry remains on the left and exit on the right. Enemy letters and annotation text remain readable. Each flip is one Undo step and autosaves like other edits; save JSON to keep a portable copy.
+Use **Flip Horizontally** or **Flip Vertically** under ROOM / VIEW in the left toolbar. A flip mirrors all carve/fill operations and markers within the current bounds, preserving operation order and IDs. Platform spans and complete 270-world-unit door openings are mirrored correctly. Horizontal flips swap entry/exit roles so entry remains on the left and exit on the right. Enemy letters and annotation text remain readable. Each flip is one Undo step and autosaves like other edits; save JSON to keep a portable copy.
 
 Enemy identifier buttons show full names in visible editor-rendered tooltips on hover or keyboard focus.
 
@@ -62,10 +62,21 @@ Choose **Copy Area** (R), then click and drag a snapped rectangle in any directi
 
 This copies resolved cells, **not whole overlapping carve/fill objects**. Each paste first fills its destination rectangle black, then carves only the clipped white parts captured from the source. Geometry outside the destination is unchanged, including portions of large objects crossing its boundary. Enemy/hazard centers and annotation anchors inside the selection are included; platform spans clip precisely at its edges. Right/bottom boundaries are exclusive for point markers. Marker icons/text remain complete and readable rather than being sliced into image pixels. Destination non-door markers inside the patch are replaced; crossing platforms retain their outside fragments. Every pasted marker gets a fresh ID.
 
-Entry/exit doors are not copied or moved. Pasting geometry across a door may affect its clearance; validation reports this. Placement must fit completely inside the room (red outline indicates an invalid destination). Each paste is a single undoable edit, autosaves, and is included normally in JSON/PNG/SVG. The clipboard is local to the current editor session; it does not access the operating-system clipboard, is not saved in room JSON, and clears when loading a different room or refreshing the page. Copying itself neither changes the room nor adds an Undo step.
+Entry/exit doors are not included in Copy/Paste. Pasting geometry across a door may affect its clearance; validation reports this. Placement must fit completely inside the room (red outline indicates an invalid destination). Each paste is a single undoable edit, autosaves, and is included normally in JSON/PNG/SVG. The clipboard is local to the current editor session; it does not access the operating-system clipboard, is not saved in room JSON, and clears when loading a different room or refreshing the page. Copying itself neither changes the room nor adds an Undo step.
 
 ## Click or drag to paint
 
 Carve Space clicks paint one grid cell white; Fill Geometry clicks paint one grid cell black. Dragging still draws a snapped rectangle (including one-cell-thick strips). Cells use the current grid spacing, not physical screen pixels. Small mouse jitter remains a click. Outside/incomplete-edge-cell clicks do nothing; Escape cancels a pending gesture. Every completed paint is undoable and autosaved.
 
 Faint object outlines have been removed, and joined white regions render without rectangle seams. Selected geometry retains a small resize handle. Show grid is optional and starts off for a clean view.
+
+
+## Move a selected area
+
+Use the existing **Copy Area** drag gesture to select a rectangle, then click **Move** (M) before placing a copy. Click the destination top-left using the same grid snapping and preview as **Place Copy**. Move finishes after one placement; Copy/Paste remains repeatable. The source's resolved cells are filled black, destination contents are replaced just as with Paste, and selected markers retain their IDs and data. Overlapping destinations work. A clipped platform moves only its selected span; outside fragments remain and receive distinct IDs. Ordered carve/fill history is extended rather than changing the JSON schema.
+
+Doors whose opening top is inside the selected vertical interval are included in Move, including doors on the right boundary of the rectangle. Doors keep their boundary X and canonical 270-unit opening height. A selection containing doors can move vertically only; an invalid horizontal destination or out-of-bounds opening is rejected before the source is changed. Other selections can move in either direction.
+
+Escape or switching tools cancels placement without modifying the room. One Undo restores both the source and overwritten destination; Redo repeats the whole move. Moving to the original location adds no edit. If another edit changes the room during placement, Move rejects the stale snapshot and asks for a new selection. The Copy/Paste clipboard is unaffected by Move.
+
+The left toolbar uses compact **EDIT**, **GEOMETRY**, **OBJECTS**, and **ROOM / VIEW** groups with two-column button grids. File actions remain together in the top bar, view controls above the canvas, and guide/settings controls in properties. Small widths stack the groups to keep buttons readable.

@@ -89,7 +89,7 @@ nav {
 }
 main {
   display: grid;
-  grid-template-columns: 145px minmax(320px, 1fr) 285px;
+  grid-template-columns: 250px minmax(320px, 1fr) 285px;
   flex: 1;
   min-height: 0;
 }
@@ -102,12 +102,21 @@ main {
 .toolbar {
   border-right: 1px solid #303a46;
 }
+.tool-group { margin-bottom: 12px; }
+.tool-group h2 { margin: 0 0 7px; }
+.tool-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .toolbar button {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
   width: 100%;
+  min-height: 36px;
   text-align: left;
-  margin-bottom: 6px;
+  padding: 7px;
+  line-height: 1.2;
 }
+.tool-shortcut { opacity: .5; font-size: 10px; flex-shrink: 0; }
 .toolbar button.active {
   color: #ffc47e;
   border-color: #bc8348;
@@ -121,9 +130,9 @@ h2 {
 }
 .toolbar p {
   font-size: 11px;
-  line-height: 1.7;
+  line-height: 1.5;
   color: #82919e;
-  margin-top: 20px;
+  margin: 12px 0 0;
 }
 .workspace {
   display: flex;
@@ -257,7 +266,7 @@ footer {
 }
 @media (max-width: 1000px) {
   main {
-    grid-template-columns: 115px minmax(260px, 1fr) 235px;
+    grid-template-columns: 230px minmax(260px, 1fr) 235px;
   }
   .brand {
     margin-right: 0;
@@ -278,7 +287,7 @@ footer {
     min-height: 100vh;
   }
   main {
-    grid-template-columns: 100px minmax(200px, 1fr);
+    grid-template-columns: 210px minmax(200px, 1fr);
   }
   .properties {
     grid-column: 1/-1;
@@ -327,4 +336,13 @@ footer {
 .enemy-labels button:hover .enemy-tooltip,
 .enemy-labels button:focus-visible .enemy-tooltip {
   display: block;
+}
+
+@media (max-width: 480px) {
+  main { grid-template-columns: minmax(0, 1fr); }
+  .toolbar { border-right: 0; border-bottom: 1px solid #303a46; }
+  #tools { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .toolbar .tool-grid { grid-template-columns: minmax(0, 1fr); }
+  .toolbar > .tool-group .tool-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .properties { grid-template-columns: minmax(0, 1fr); }
 }
