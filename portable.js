@@ -518,9 +518,84 @@ async function exportPNG(room, overlays) {
 }
 
 
+// ----- src/area-copy.js -----
+const markerGroups = ["enemies", "platforms", "hazards", "annotations"];
+const containsPoint = (area, point) => point.x >= area.x && point.x < area.x + area.width
+  && point.y >= area.y && point.y < area.y + area.height;
+
+function areaFits(room, area) {
+  return [area.x, area.y, area.width, area.height].every(Number.isFinite)
+    && area.width > 0 && area.height > 0 && area.x >= 0 && area.y >= 0
+    && area.x + area.width <= room.settings.width
+    && area.y + area.height <= room.settings.height;
+}
+
+// Capture the resolved geometry, never whole source operations. Coordinates in
+// the clipboard are relative to the selected top-left; black is implicit.
+function copyArea(room, area) {
+  if (!areaFits(room, area)) throw Error("Select a positive-size area inside room bounds.");
+  const clip = { width: area.width, height: area.height,
+    geometry_operations: [], ...Object.fromEntries(markerGroups.map(g => [g, []])) };
+  for (const r of finalGeometry(room)) {
+    const x = Math.max(area.x, r.x), y = Math.max(area.y, r.y);
+    const width = Math.min(area.x + area.width, r.x + r.w) - x;
+    const height = Math.min(area.y + area.height, r.y + r.h) - y;
+    if (width > 0 && height > 0)
+      clip.geometry_operations.push(geometry("carve", x - area.x, y - area.y, width, height));
+  }
+  for (const group of markerGroups) {
+    for (const o of room[group]) {
+      if (group === "platforms") {
+        if (o.y < area.y || o.y >= area.y + area.height) continue;
+        const x = Math.max(o.x, area.x);
+        const length = Math.min(o.x + o.length, area.x + area.width) - x;
+        if (length > 0) clip[group].push({ ...clone(o), x: x - area.x, y: o.y - area.y, length });
+      } else if (containsPoint(area, o)) {
+        clip[group].push({ ...clone(o), x: o.x - area.x, y: o.y - area.y });
+      }
+    }
+  }
+  return clip;
+}
+
+// Replace the destination patch. Clear its white space first, replay clipped
+// white regions, replace only its markers and preserve every outside fragment.
+// The caller commits this entire operation as one history/autosave edit.
+function pasteArea(room, clip, point) {
+  const area = { ...point, width: clip.width, height: clip.height };
+  if (!areaFits(room, area)) throw Error("The copied area must fit completely inside room bounds.");
+  room.geometry_operations.push(geometry("fill", area.x, area.y, area.width, area.height));
+  for (const o of clip.geometry_operations)
+    room.geometry_operations.push({ ...clone(o), id: uid(), x: o.x + area.x, y: o.y + area.y });
+  for (const group of markerGroups) {
+    room[group] = room[group].flatMap(o => {
+      if (group !== "platforms") return containsPoint(area, o) ? [] : [o];
+      if (o.y < area.y || o.y >= area.y + area.height
+        || o.x + o.length <= area.x || o.x >= area.x + area.width) return [o];
+      const fragments = [];
+      if (o.x < area.x) fragments.push({ ...o, length: area.x - o.x });
+      if (o.x + o.length > area.x + area.width)
+        fragments.push({ ...o, id: fragments.length ? uid() : o.id,
+          x: area.x + area.width, length: o.x + o.length - area.x - area.width });
+      return fragments;
+    });
+    room[group].push(...clip[group].map(o => ({ ...clone(o), id: uid(), x: o.x + area.x, y: o.y + area.y })));
+  }
+}
+
+// Feed the existing scene renderer so preview icons/colors match normal rooms.
+function areaPreviewRoom(clip, settings) {
+  return { settings: { ...settings, width: clip.width, height: clip.height },
+    geometry_operations: clip.geometry_operations, doors: [],
+    ...Object.fromEntries(markerGroups.map(g => [g, clip[g]])) };
+}
+
+
 // ----- src/tools.js -----
 const toolList = [
   ["select", "Select", "V"],
+  ["area", "Copy Area", "R"],
+  ["paste", "Place Copy", "T"],
   ["carve", "Carve Space", "C"],
   ["fill", "Fill Geometry", "F"],
   ["entry", "Entry door", "I"],
@@ -534,6 +609,7 @@ const toolList = [
 function installTools(editor) {
   const svg = document.querySelector("#canvas"),
     viewport = document.querySelector("#viewport");
+  let hoverPoint = null;
   let drag = null,
     space = false;
   const raw = (e) => {
@@ -561,6 +637,18 @@ function installTools(editor) {
     editor.render();
   }
   editor.cancel = cancel;
+  const areaPoint = p => ({
+    x: Math.max(0, Math.min(editor.room.settings.width, p.x)),
+    y: Math.max(0, Math.min(editor.room.settings.height, p.y)),
+  });
+  function showPaste(p) {
+    if (!editor.clipboard) return;
+    const clip = editor.clipboard;
+    const fits = areaFits(editor.room, { ...p, width: clip.width, height: clip.height });
+    editor.preview(`<g transform="translate(${p.x} ${p.y})" opacity=".8">${scene(areaPreviewRoom(clip, editor.room.settings))}<rect width="${clip.width}" height="${clip.height}" fill="none" stroke="${fits ? "#ffc77d" : "#f07878"}" stroke-width=".12" stroke-dasharray=".3 .2"/></g>`);
+  }
+  editor.refreshPaste = () => { if (editor.tool === "paste" && hoverPoint) showPaste(hoverPoint); };
+
   svg.addEventListener("pointerdown", (e) => {
     if (e.button !== 0 && e.button !== 1) return;
     e.preventDefault();
@@ -575,6 +663,17 @@ function installTools(editor) {
       return;
     }
     const tool = editor.tool;
+    if (tool === "paste") {
+      editor.placeCopy(p);
+      showPaste(p);
+      return;
+    }
+    if (tool === "area") {
+      drag = { mode: "area", start: areaPoint(p), before: clone(editor.room) };
+      editor.selected = null;
+      editor.render();
+      return;
+    }
     if (tool === "select" || tool === "erase") {
       const current = objects(editor.room).find(
         ({ object: o }) => o.id === editor.selected,
@@ -648,7 +747,19 @@ function installTools(editor) {
       u = editor.room.settings.units_per_cell;
     document.querySelector("#cursor").textContent =
       `Grid ${p.x}, ${p.y} · World ${p.x * u}, ${p.y * u}`;
-    if (!drag) return;
+    hoverPoint = p;
+    if (!drag) {
+      if (editor.tool === "paste") showPaste(p);
+      return;
+    }
+    if (drag.mode === "area") {
+      const end = areaPoint(p);
+      drag.area = { x: Math.min(drag.start.x, end.x), y: Math.min(drag.start.y, end.y),
+        width: Math.abs(end.x - drag.start.x), height: Math.abs(end.y - drag.start.y) };
+      const a = drag.area;
+      editor.preview(`<rect x="${a.x}" y="${a.y}" width="${a.width}" height="${a.height}" fill="#f3b15d" fill-opacity=".12" stroke="#ffc77d" stroke-width=".1" stroke-dasharray=".3 .2"/>`);
+      return;
+    }
     if (drag.mode === "pan") {
       editor.view.x = drag.view.x + e.clientX - drag.client.x;
       editor.view.y = drag.view.y + e.clientY - drag.client.y;
@@ -695,6 +806,10 @@ function installTools(editor) {
     const d = drag;
     drag = null;
     editor.preview("");
+    if (d.mode === "area") {
+      if (d.area?.width > 0 && d.area?.height > 0) editor.captureArea(d.area);
+      return;
+    }
     if (d.mode === "move" || d.mode === "resize") editor.commit();
     else if (d.object)
       editor.change((room) => {
@@ -706,6 +821,9 @@ function installTools(editor) {
         ].push(o);
         editor.selected = o.id;
       });
+  });
+  svg.addEventListener("pointerleave", () => {
+    if (!drag) { hoverPoint = null; editor.preview(""); }
   });
   svg.addEventListener("pointercancel", cancel);
   svg.addEventListener("lostpointercapture", () => {
@@ -738,6 +856,14 @@ function installTools(editor) {
       return;
     }
     if (e.target.matches("input,textarea,select")) return;
+    if (mod && ["c", "v"].includes(k)) {
+      e.preventDefault();
+      if (k === "c") {
+        if (editor.areaSelection) editor.captureArea(editor.areaSelection);
+        else editor.message("Choose Copy Area and drag a rectangle first.");
+      } else editor.setTool("paste");
+      return;
+    }
     if (mod && ["z", "y", "d"].includes(k)) {
       e.preventDefault();
       if (k === "z") e.shiftKey ? editor.redo() : editor.undo();
@@ -752,6 +878,7 @@ function installTools(editor) {
     if (e.key === "Escape") {
       cancel();
       editor.selected = null;
+      if (editor.tool === "paste" || editor.tool === "area") editor.setTool("select");
       editor.render();
     }
     if (["Delete", "Backspace"].includes(e.key)) {
@@ -1093,6 +1220,8 @@ const settingLabels = {
 };
 const hints = {
   select: "Select · drag to move · bottom-right handle to resize",
+  area: "Drag a grid rectangle to copy its cells and markers; doors stay fixed",
+  paste: "Click to place the copy at its top-left · repeat to stamp · Escape to cancel",
   carve: "Drag a snapped rectangle to carve white space",
   fill: "Drag a snapped rectangle to fill black geometry",
   entry: "Click opening top · entry snaps to LEFT boundary",
@@ -1114,6 +1243,8 @@ const editor = {
   room: initial,
   history: new History(initial),
   selected: null,
+  clipboard: null,
+  areaSelection: null,
   tool: "select",
   dirty: restored?.dirty ?? false,
   view: { scale: 20, x: 30, y: 50 },
@@ -1236,7 +1367,23 @@ const editor = {
       this.selected = o.id;
     });
   },
+  captureArea(area) {
+    try {
+      this.clipboard = copyArea(this.room, area);
+      this.areaSelection = clone(area);
+      this.setTool("paste");
+      this.message(`Copied ${area.width} × ${area.height} cells and markers. Click to place; doors stay fixed.`);
+    } catch (e) { this.message(e.message); }
+  },
+  placeCopy(point) {
+    if (!this.clipboard) return;
+    this.change(room => pasteArea(room, this.clipboard, point));
+  },
   setTool(tool) {
+    if (tool === "paste" && !this.clipboard) {
+      this.message("Choose Copy Area and drag a rectangle first.");
+      return;
+    }
     this.cancel?.();
     this.tool = tool;
     document.querySelectorAll("[data-tool]").forEach((b) => {
@@ -1245,6 +1392,7 @@ const editor = {
     });
     $("tool-hint").textContent = hints[tool];
     $("canvas").style.cursor = tool === "select" ? "default" : "crosshair";
+    this.refreshPaste?.();
   },
   fit() {
     const r = $("canvas").getBoundingClientRect(),
@@ -1263,14 +1411,19 @@ const editor = {
   replace(room, dirty = true) {
     this.cancel?.();
     this.room = room;
+    this.clipboard = null;
+    this.areaSelection = null;
+    this.tool = "select";
     this.history = new History(room);
     this.selected = null;
     this.dirty = dirty;
     this.persist();
     this.render();
     this.fit();
+    this.setTool("select");
   },
   panels() {
+    document.querySelector('[data-tool="paste"]').disabled = !this.clipboard;
     $("room-id").value = this.room.room_id;
     $("dirty").textContent = this.dirty ? "● Unsaved JSON" : "";
     $("undo").disabled = !this.history.past.length;
