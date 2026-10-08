@@ -8,17 +8,20 @@ The website opens directly into the editor. No login, installation, backend, or 
 
 ## Use
 
-Draw floor-aligned corridors and connect them with shafts. Place blue entry and purple exit doors, red labeled enemy markers, green one-way platforms, hazards, and annotations. Select objects to move, resize, edit, duplicate or delete them. Validation checks the geometric Entry → Exit path, disconnected islands, exact floor alignment, doorway clearance, and marker placement.
+Paint snapped rectangles with **Carve Space** (white) and **Fill Geometry** (black). Fixed floors, Corridor and Shaft authoring have been removed. Build variable-height passages, tall chambers and split/rejoin routes without floor alignment. Select rectangles to move, resize using their bottom-right handle, edit, duplicate or delete. The All objects dropdown selects hidden/overlapping operations. Place blue entry/purple exit doors by clicking their opening top, red enemy markers, green one-way platforms, hazards and annotations. Validation uses final white space for connectivity, islands, doorway coverage and enemy placement, and checks rectangle validity, bounds, naming and marker bounds.
 
+Schema v2 stores ordered `geometry_operations` with type carve/fill, x/y/width/height and stable ID. Starting with solid room bounds, replay first-to-last: carve adds white space; fill removes it; later operations override earlier ones. Exact rectangle subtraction supplies the same final geometry to display, validation and export. Duplicates append and run last; deletion replays remaining operations. Edges snap to the configurable logical grid; visible grid is optional. Property editing accepts snapped rectangle values. A zero-area drag does nothing.
+
+Old schema v1 JSON/autosave migrates automatically: stored corridor/shaft coordinates become carve rectangles, old floor settings/metadata are removed, and doors/markers retain their positions. Saving writes v2. Old geometry is never recalculated from floor settings.
 - Save/load complete, human-readable room JSON to continue editing on another computer.
 - Export clean schematic PNG at 1×, 2× or 4× and vector SVG.
 - Undo/redo edits, zoom with the mouse wheel, and pan with middle mouse or Space + drag.
 - Select TW-01 or TW-02 from Examples to load editable demonstration rooms.
 - Browser autosave restores work on this browser/origin; JSON is the portable document.
 
-Keyboard tools: V select, C corridor, S shaft, I entry, O exit, E enemy, P platform, H hazard, A annotation, X erase. Delete removes selection. Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes; Ctrl/Cmd+S saves JSON. Escape cancels a gesture.
+Keyboard tools: V select, C Carve Space, F Fill Geometry, I entry, O exit, E enemy, P platform, H hazard, A annotation, X erase. Delete removes selection. Ctrl/Cmd+Z undoes; Ctrl/Cmd+Shift+Z or Ctrl/Cmd+Y redoes; Ctrl/Cmd+S saves JSON. Escape cancels a gesture.
 
-Room coordinates are logical grid cells, positive X right and Y down. Default scale is 90 world units per cell, an editor default rather than canon. Floor 0 is lowest. Corridor ceiling and floor elevations are exact. Door opening height is 270 world units; canonical opening width and stitching anchor remain explicitly unresolved. Geometric connectivity does not simulate player movement. Example layouts are editor demonstrations, not canonical gameplay scenes.
+Room coordinates are logical grid cells, positive X right and Y down. Default scale is 90 world units per cell, an editor default rather than canon. Door opening height is 270 world units; canonical opening width and stitching anchor remain explicitly unresolved. Geometric connectivity does not simulate player movement. Example layouts are editor demonstrations, not canonical gameplay scenes.
 
 ## Offline Windows use
 

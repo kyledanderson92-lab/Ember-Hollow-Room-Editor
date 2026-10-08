@@ -1,14 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "room_id": "TW-02",
   "room_family": "TW",
   "settings": {
     "width": 48,
     "height": 32,
-    "floors": 4,
-    "pitch": 7,
-    "corridor_height": 3,
-    "shaft_width": 3,
     "units_per_cell": 90,
     "grid_step": 1,
     "export_scale": 2
@@ -18,144 +14,24 @@
     "width_world_units": null,
     "anchor_convention": null
   },
-  "corridors": [
-    {
-      "id": "f710e911-d912-43eb-a03e-6faa1124a158",
-      "type": "corridor",
-      "x": 0,
-      "length": 12,
-      "floor": 0,
-      "y": 27,
-      "height": 3
-    },
-    {
-      "id": "8afe391b-e27d-4354-b4dd-237d1ee97902",
-      "type": "corridor",
-      "x": 9,
-      "length": 15,
-      "floor": 1,
-      "y": 20,
-      "height": 3
-    },
-    {
-      "id": "92baf2d5-108d-453e-93dc-9d7ffecb71d3",
-      "type": "corridor",
-      "x": 21,
-      "length": 15,
-      "floor": 2,
-      "y": 13,
-      "height": 3
-    },
-    {
-      "id": "55f59217-0ede-47d5-bd7d-b328917fef7d",
-      "type": "corridor",
-      "x": 33,
-      "length": 15,
-      "floor": 1,
-      "y": 20,
-      "height": 3
-    },
-    {
-      "id": "45d302e5-7420-47e6-8d9a-b1b8f4801ebf",
-      "type": "corridor",
-      "x": 14,
-      "length": 10,
-      "floor": 2,
-      "y": 13,
-      "height": 3
-    },
-    {
-      "id": "a710529e-a39e-43bf-a4b7-4a9429b645f8",
-      "type": "corridor",
-      "x": 21,
-      "length": 9,
-      "floor": 3,
-      "y": 6,
-      "height": 3
-    }
-  ],
-  "shafts": [
-    {
-      "id": "ad4f534a-6407-4087-bf62-4d06efc8d517",
-      "type": "shaft",
-      "x": 9,
-      "width": 3,
-      "from_floor": 0,
-      "to_floor": 1,
-      "y": 20,
-      "height": 10
-    },
-    {
-      "id": "a9b8fb9b-c344-419c-afbb-640efcc0d2de",
-      "type": "shaft",
-      "x": 21,
-      "width": 3,
-      "from_floor": 1,
-      "to_floor": 2,
-      "y": 13,
-      "height": 10
-    },
-    {
-      "id": "e8943a12-c08e-43c6-b869-8841e926445b",
-      "type": "shaft",
-      "x": 33,
-      "width": 3,
-      "from_floor": 1,
-      "to_floor": 2,
-      "y": 13,
-      "height": 10
-    },
-    {
-      "id": "a93bfe72-3d10-456f-beb7-563795d7f0e6",
-      "type": "shaft",
-      "x": 14,
-      "width": 3,
-      "from_floor": 1,
-      "to_floor": 2,
-      "y": 13,
-      "height": 10
-    },
-    {
-      "id": "a0afdea4-6f8b-41e7-8b8c-c90ed614aa11",
-      "type": "shaft",
-      "x": 21,
-      "width": 3,
-      "from_floor": 2,
-      "to_floor": 3,
-      "y": 6,
-      "height": 10
-    },
-    {
-      "id": "e16e8f54-e036-4414-a454-fb2e2fc699e5",
-      "type": "shaft",
-      "x": 27,
-      "width": 3,
-      "from_floor": 2,
-      "to_floor": 3,
-      "y": 6,
-      "height": 10
-    }
-  ],
   "doors": [
     {
       "id": "entry",
       "type": "door",
       "role": "entry",
       "x": 0,
-      "floor": 0,
       "marker_width": 0.6,
       "height_world_units": 270,
-      "y": 27
+      "y": 25
     },
     {
       "id": "exit",
       "type": "door",
       "role": "exit",
       "x": 48,
-      "floor": 1,
       "marker_width": 0.6,
       "height_world_units": 270,
-      "y": 20
+      "y": 18
     }
   ],
   "enemies": [
@@ -163,28 +39,28 @@
       "id": "enemy-0",
       "type": "enemy",
       "x": 6,
-      "y": 28.5,
+      "y": 28,
       "label": "G"
     },
     {
       "id": "enemy-1",
       "type": "enemy",
       "x": 17,
-      "y": 21.5,
+      "y": 20,
       "label": "P"
     },
     {
       "id": "enemy-2",
       "type": "enemy",
       "x": 29,
-      "y": 14.5,
+      "y": 12,
       "label": "F"
     },
     {
       "id": "enemy-3",
       "type": "enemy",
       "x": 41,
-      "y": 21.5,
+      "y": 20,
       "label": "B"
     }
   ],
@@ -192,11 +68,85 @@
     {
       "id": "platform-1",
       "type": "platform",
-      "x": 12,
+      "x": 9,
       "y": 23,
-      "length": 3
+      "length": 4
     }
   ],
   "hazards": [],
-  "annotations": []
+  "annotations": [],
+  "geometry_operations": [
+    {
+      "id": "carve-0",
+      "type": "carve",
+      "x": 0,
+      "y": 25,
+      "width": 12,
+      "height": 5
+    },
+    {
+      "id": "carve-1",
+      "type": "carve",
+      "x": 9,
+      "y": 17,
+      "width": 4,
+      "height": 13
+    },
+    {
+      "id": "carve-2",
+      "type": "carve",
+      "x": 9,
+      "y": 17,
+      "width": 16,
+      "height": 5
+    },
+    {
+      "id": "carve-3",
+      "type": "carve",
+      "x": 21,
+      "y": 10,
+      "width": 5,
+      "height": 12
+    },
+    {
+      "id": "carve-4",
+      "type": "carve",
+      "x": 21,
+      "y": 10,
+      "width": 16,
+      "height": 4
+    },
+    {
+      "id": "carve-5",
+      "type": "carve",
+      "x": 33,
+      "y": 10,
+      "width": 4,
+      "height": 12
+    },
+    {
+      "id": "carve-6",
+      "type": "carve",
+      "x": 33,
+      "y": 18,
+      "width": 15,
+      "height": 4
+    },
+    {
+      "id": "carve-7",
+      "type": "carve",
+      "x": 14,
+      "y": 11,
+      "width": 4,
+      "height": 10
+    },
+    {
+      "id": "carve-8",
+      "type": "carve",
+      "x": 14,
+      "y": 11,
+      "width": 11,
+      "height": 3
+    }
+  ]
 }

@@ -1,14 +1,10 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "room_id": "TW-01",
   "room_family": "TW",
   "settings": {
     "width": 48,
     "height": 32,
-    "floors": 4,
-    "pitch": 7,
-    "corridor_height": 3,
-    "shaft_width": 3,
     "units_per_cell": 90,
     "grid_step": 1,
     "export_scale": 2
@@ -18,77 +14,24 @@
     "width_world_units": null,
     "anchor_convention": null
   },
-  "corridors": [
-    {
-      "id": "1c533da6-c8c9-4358-9a40-42773916a703",
-      "type": "corridor",
-      "x": 0,
-      "length": 15,
-      "floor": 0,
-      "y": 27,
-      "height": 3
-    },
-    {
-      "id": "6aaa52dd-ac20-4fb1-adbf-6599aa395533",
-      "type": "corridor",
-      "x": 12,
-      "length": 15,
-      "floor": 1,
-      "y": 20,
-      "height": 3
-    },
-    {
-      "id": "8021a951-1a14-42b9-ac6c-5a1028c02888",
-      "type": "corridor",
-      "x": 24,
-      "length": 24,
-      "floor": 2,
-      "y": 13,
-      "height": 3
-    }
-  ],
-  "shafts": [
-    {
-      "id": "d137fc64-b908-4393-aa62-6c8adb83d900",
-      "type": "shaft",
-      "x": 12,
-      "width": 3,
-      "from_floor": 0,
-      "to_floor": 1,
-      "y": 20,
-      "height": 10
-    },
-    {
-      "id": "3f288592-1275-47d7-b9b6-a23f51fa0ee3",
-      "type": "shaft",
-      "x": 24,
-      "width": 3,
-      "from_floor": 1,
-      "to_floor": 2,
-      "y": 13,
-      "height": 10
-    }
-  ],
   "doors": [
     {
       "id": "entry",
       "type": "door",
       "role": "entry",
       "x": 0,
-      "floor": 0,
       "marker_width": 0.6,
       "height_world_units": 270,
-      "y": 27
+      "y": 25
     },
     {
       "id": "exit",
       "type": "door",
       "role": "exit",
       "x": 48,
-      "floor": 2,
       "marker_width": 0.6,
       "height_world_units": 270,
-      "y": 13
+      "y": 11
     }
   ],
   "enemies": [
@@ -96,21 +39,21 @@
       "id": "enemy-0",
       "type": "enemy",
       "x": 7,
-      "y": 28.5,
+      "y": 28,
       "label": "G"
     },
     {
       "id": "enemy-1",
       "type": "enemy",
       "x": 20,
-      "y": 21.5,
+      "y": 20,
       "label": "F"
     },
     {
       "id": "enemy-2",
       "type": "enemy",
       "x": 39,
-      "y": 14.5,
+      "y": 13,
       "label": "B"
     }
   ],
@@ -118,11 +61,61 @@
     {
       "id": "platform-1",
       "type": "platform",
-      "x": 12,
+      "x": 11,
       "y": 23,
-      "length": 3
+      "length": 4
     }
   ],
   "hazards": [],
-  "annotations": []
+  "annotations": [],
+  "geometry_operations": [
+    {
+      "id": "carve-0",
+      "type": "carve",
+      "x": 0,
+      "y": 25,
+      "width": 14,
+      "height": 5
+    },
+    {
+      "id": "carve-1",
+      "type": "carve",
+      "x": 11,
+      "y": 18,
+      "width": 4,
+      "height": 12
+    },
+    {
+      "id": "carve-2",
+      "type": "carve",
+      "x": 11,
+      "y": 18,
+      "width": 17,
+      "height": 4
+    },
+    {
+      "id": "carve-3",
+      "type": "carve",
+      "x": 24,
+      "y": 9,
+      "width": 5,
+      "height": 13
+    },
+    {
+      "id": "carve-4",
+      "type": "carve",
+      "x": 24,
+      "y": 9,
+      "width": 24,
+      "height": 6
+    },
+    {
+      "id": "trim",
+      "type": "fill",
+      "x": 32,
+      "y": 9,
+      "width": 8,
+      "height": 2
+    }
+  ]
 }

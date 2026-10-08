@@ -9,14 +9,10 @@ const presets = {
   TW: {
     name: "Tight Weaving Corridor",
     guidance:
-      "Fixed 2–3 Sol-height corridors; frequent rises/drops; short splits that rejoin.",
+      "Variable-height passages and vertical transitions; short splits that rejoin.",
     settings: {
       width: 48,
       height: 32,
-      floors: 4,
-      pitch: 7,
-      corridor_height: 3,
-      shaft_width: 3,
       units_per_cell: 90,
       grid_step: 1,
       export_scale: 2,
@@ -29,10 +25,6 @@ const presets = {
     settings: {
       width: 43,
       height: 40,
-      floors: 5,
-      pitch: 7,
-      corridor_height: 5,
-      shaft_width: 4,
       units_per_cell: 90,
       grid_step: 1,
       export_scale: 2,
@@ -42,182 +34,61 @@ const presets = {
 
 
 // ----- src/model.js -----
-const groups = [
-  "corridors",
-  "shafts",
-  "doors",
-  "enemies",
-  "platforms",
-  "hazards",
-  "annotations",
-];
+const groups = ["geometry_operations", "doors", "enemies", "platforms", "hazards", "annotations"];
 const clone = (value) => structuredClone(value);
-const uid = () =>
-  globalThis.crypto?.randomUUID?.() ?? `o-${Date.now()}-${Math.random()}`;
+const uid = () => globalThis.crypto?.randomUUID?.() ?? `o-${Date.now()}-${Math.random()}`;
 function newRoom(family = "TW", number = 1) {
-  return {
-    schema_version: 1,
-    room_id: `${family}-${String(number).padStart(2, "0")}`,
-    room_family: family,
+  return { schema_version: 2, room_id: `${family}-${String(number).padStart(2, "0")}`, room_family: family,
     settings: clone((presets[family] ?? presets.TW).settings),
-    door_contract: {
-      height_world_units: 270,
-      width_world_units: null,
-      anchor_convention: null,
-    },
-    ...Object.fromEntries(groups.map((g) => [g, []])),
-  };
+    door_contract: { height_world_units: 270, width_world_units: null, anchor_convention: null },
+    ...Object.fromEntries(groups.map(g => [g, []])) };
 }
-// Grid origin top-left, +Y down. Floor 0 is lowest; floor elevations rise by pitch.
-const floorY = (room, floor) =>
-  room.settings.height - 2 - floor * room.settings.pitch;
-const nearestFloor = (room, y) =>
-  Math.max(
-    0,
-    Math.min(
-      room.settings.floors - 1,
-      Math.round((room.settings.height - 2 - y) / room.settings.pitch),
-    ),
-  );
+const geometry = (type, x, y, width, height) => ({ id: uid(), type, x, y, width, height });
 function rect(room, o) {
-  if (o.type === "corridor")
-    return { x: o.x, y: o.y, w: o.length, h: o.height };
-  if (o.type === "shaft") return { x: o.x, y: o.y, w: o.width, h: o.height };
-  if (o.type === "door") {
-    const h = o.height_world_units / room.settings.units_per_cell;
-    return {
-      x: o.x - (o.role === "exit" ? o.marker_width : 0),
-      y: o.y,
-      w: o.marker_width,
-      h,
-    };
+  if (["carve", "fill"].includes(o.type)) return {x:o.x,y:o.y,w:o.width,h:o.height};
+  if (o.type === "door") return { x:o.x-(o.role === "exit" ? o.marker_width : 0), y:o.y, w:o.marker_width, h:o.height_world_units/room.settings.units_per_cell };
+  return {x:o.x-.35,y:o.y-.35,w:o.type === "platform" ? o.length : .7,h:.7};
+}
+const objects = room => groups.flatMap(group => room[group].map(object => ({group,object})));
+const inside = (p,r) => p.x >= r.x && p.x <= r.x+r.w && p.y >= r.y && p.y <= r.y+r.h;
+// Exact rectangle difference. Shared edges have zero area; no sampling/rasterization.
+function subtract(a,b) {
+  const x=Math.max(a.x,b.x), y=Math.max(a.y,b.y), right=Math.min(a.x+a.w,b.x+b.w), bottom=Math.min(a.y+a.h,b.y+b.h);
+  if (right<=x || bottom<=y) return [a];
+  return [{x:a.x,y:a.y,w:a.w,h:y-a.y}, {x:a.x,y:bottom,w:a.w,h:a.y+a.h-bottom},
+    {x:a.x,y,w:x-a.x,h:bottom-y}, {x:right,y,w:a.x+a.w-right,h:bottom-y}].filter(r=>r.w>0 && r.h>0);
+}
+const validRectangle = o => [o.x,o.y,o.width,o.height].every(Number.isFinite) && o.width>0 && o.height>0 && ["carve","fill"].includes(o.type);
+function finalGeometry(room) {
+  let regions=[];
+  const bounds={x:0,y:0,w:room.settings.width,h:room.settings.height};
+  for (const o of room.geometry_operations) {
+    if (!validRectangle(o)) continue;
+    const r=rect(room,o), x=Math.max(0,r.x),y=Math.max(0,r.y),
+      clipped={x,y,w:Math.min(bounds.w,r.x+r.w)-x,h:Math.min(bounds.h,r.y+r.h)-y};
+    if (clipped.w<=0 || clipped.h<=0) continue;
+    if (o.type === "fill") regions=regions.flatMap(a=>subtract(a,clipped));
+    else {
+      let additions=[clipped];
+      for (const existing of regions) additions=additions.flatMap(a=>subtract(a,existing));
+      regions.push(...additions);
+    }
   }
-  return {
-    x: o.x - 0.35,
-    y: o.y - 0.35,
-    w: o.type === "platform" ? o.length : 0.7,
-    h: 0.7,
-  };
+  return regions;
 }
-function corridor(room, x, length, floor) {
-  return {
-    id: uid(),
-    type: "corridor",
-    x,
-    length,
-    floor,
-    y: floorY(room, floor) - room.settings.corridor_height,
-    height: room.settings.corridor_height,
-  };
+const traversable = (room,p) => finalGeometry(room).some(r=>p.x>=r.x && p.x<r.x+r.w && p.y>=r.y && p.y<r.y+r.h);
+function move(room,o,dx,dy) {
+  if (o.type !== "door") o.x+=dx;
+  o.y+=dy;
 }
-function shaft(room, x, from, to, width = room.settings.shaft_width) {
-  const lo = Math.min(from, to),
-    hi = Math.max(from, to),
-    y = floorY(room, hi) - room.settings.corridor_height;
-  return {
-    id: uid(),
-    type: "shaft",
-    x,
-    width,
-    from_floor: lo,
-    to_floor: hi,
-    y,
-    height: floorY(room, lo) - y,
-  };
-}
-function syncGeometry(room) {
-  room.corridors = room.corridors.map((o) => ({
-    ...o,
-    ...corridor(room, o.x, o.length, o.floor),
-    id: o.id,
-  }));
-  room.shafts = room.shafts.map((o) => ({
-    ...o,
-    ...shaft(room, o.x, o.from_floor, o.to_floor, o.width),
-    id: o.id,
-  }));
-  room.doors.forEach((o) => {
-    o.x = o.role === "entry" ? 0 : room.settings.width;
-    o.y = floorY(room, o.floor) - 270 / room.settings.units_per_cell;
-  });
-}
-const objects = (room) =>
-  groups.flatMap((g) => room[g].map((o) => ({ group: g, object: o })));
-function inside(p, r) {
-  return p.x >= r.x && p.x <= r.x + r.w && p.y >= r.y && p.y <= r.y + r.h;
-}
-const traversable = (room, p) =>
-  [...room.corridors, ...room.shafts].some((o) => inside(p, rect(room, o)));
-function move(room, o, dx, dy) {
-  if (o.type === "corridor") {
-    o.x += dx;
-    o.floor = nearestFloor(room, floorY(room, o.floor) + dy);
-    Object.assign(o, {
-      y: floorY(room, o.floor) - room.settings.corridor_height,
-    });
-  } else if (o.type === "shaft") {
-    o.x += dx;
-    const span = o.to_floor - o.from_floor;
-    const offset = Math.round(-dy / room.settings.pitch);
-    o.from_floor = Math.max(
-      0,
-      Math.min(room.settings.floors - 1 - span, o.from_floor + offset),
-    );
-    o.to_floor = o.from_floor + span;
-    Object.assign(o, {
-      ...o,
-      ...shaft(room, o.x, o.from_floor, o.to_floor, o.width),
-      id: o.id,
-    });
-  } else if (o.type === "door") {
-    o.floor = nearestFloor(room, floorY(room, o.floor) + dy);
-    o.y = floorY(room, o.floor) - 270 / room.settings.units_per_cell;
-  } else {
-    o.x += dx;
-    o.y += dy;
-  }
-}
-function updateSettings(room, next) {
-  const candidate = clone(room);
-  candidate.settings = { ...candidate.settings, ...next };
-  for (const [key, value] of Object.entries(candidate.settings))
-    if (!Number.isFinite(value) || value <= 0)
-      throw Error(`${key} must be positive.`);
-  const s = candidate.settings;
-  if (
-    !Number.isInteger(s.floors) ||
-    s.floors > 100 ||
-    s.width > 10000 ||
-    s.height > 10000 ||
-    s.units_per_cell < 1 ||
-    s.export_scale > 4
-  )
-    throw Error("Settings exceed supported limits.");
-  if (
-    s.pitch < s.corridor_height ||
-    floorY(candidate, s.floors - 1) - s.corridor_height < 0
-  )
-    throw Error(
-      "Floors/corridor height do not fit the room. Increase bounds or reduce pitch/floor count.",
-    );
-  if (
-    objects(candidate).some(
-      ({ object: o }) => o.floor >= s.floors || o.to_floor >= s.floors,
-    )
-  )
-    throw Error(
-      "A used floor would be removed. Move or delete its objects first.",
-    );
-  syncGeometry(candidate);
-  if (
-    [...candidate.corridors, ...candidate.shafts].some((o) => {
-      const r = rect(candidate, o);
-      return r.x < 0 || r.x + r.w > s.width || r.y < 0 || r.y + r.h > s.height;
-    })
-  )
-    throw Error(
-      "These settings would put existing geometry outside room bounds.",
-    );
+function updateSettings(room,next) {
+  const candidate=clone(room);
+  candidate.settings={...candidate.settings,...next};
+  const s=candidate.settings;
+  for (const [key,value] of Object.entries(s)) if (!Number.isFinite(value)||value<=0) throw Error(`${key} must be positive.`);
+  if (s.width>10000||s.height>10000||s.units_per_cell<1||![1,2,4].includes(s.export_scale)) throw Error("Settings exceed supported limits.");
+  if (candidate.geometry_operations.some(o=>o.x<0||o.y<0||o.x+o.width>s.width||o.y+o.height>s.height)) throw Error("These settings would put existing geometry outside room bounds.");
+  candidate.doors.forEach(o=>o.x=o.role === "entry" ? 0:s.width);
   return candidate;
 }
 
@@ -259,7 +130,15 @@ const serialize = (room) => JSON.stringify(room, null, 2);
 function deserialize(text) {
   if (text.length > 5_000_000) throw Error("JSON exceeds 5 MB limit.");
   const r = JSON.parse(text);
-  if (r.schema_version !== 1) throw Error("Unsupported schema version.");
+  if (![1,2].includes(r.schema_version)) throw Error("Unsupported schema version.");
+  if (r.schema_version === 1) {
+    if (!Array.isArray(r.corridors) || !Array.isArray(r.shafts)) throw Error("Missing legacy geometry arrays.");
+    r.geometry_operations=[...r.corridors,...r.shafts].map(o=>({id:o.id,type:"carve",x:o.x,y:o.y,width:o.type === "corridor" ? o.length:o.width,height:o.height}));
+    delete r.corridors; delete r.shafts;
+    for (const key of ["floors","pitch","corridor_height","shaft_width"]) delete r.settings?.[key];
+    r.doors?.forEach(d=>delete d.floor);
+    r.schema_version=2;
+  }
   if (
     typeof r.room_id !== "string" ||
     typeof r.room_family !== "string" ||
@@ -271,10 +150,6 @@ function deserialize(text) {
   for (const k of [
     "width",
     "height",
-    "floors",
-    "pitch",
-    "corridor_height",
-    "shaft_width",
     "units_per_cell",
     "grid_step",
     "export_scale",
@@ -282,17 +157,14 @@ function deserialize(text) {
     if (!Number.isFinite(s[k]) || s[k] <= 0)
       throw Error(`Invalid setting: ${k}`);
   if (
-    !Number.isInteger(s.floors) ||
-    s.floors > 100 ||
     s.width > 10000 ||
     s.height > 10000 ||
     s.units_per_cell < 1 ||
-    s.export_scale > 4
+    ![1,2,4].includes(s.export_scale)
   )
     throw Error("Room exceeds supported limits.");
   const types = {
-    corridors: "corridor",
-    shafts: "shaft",
+    geometry_operations: null,
     doors: "door",
     enemies: "enemy",
     platforms: "platform",
@@ -300,9 +172,9 @@ function deserialize(text) {
     annotations: "annotation",
   };
   const fields = {
-    corridor: ["x", "y", "length", "height", "floor"],
-    shaft: ["x", "y", "width", "height", "from_floor", "to_floor"],
-    door: ["x", "y", "floor", "marker_width", "height_world_units"],
+    carve: ["x", "y", "width", "height"],
+    fill: ["x", "y", "width", "height"],
+    door: ["x", "y", "marker_width", "height_world_units"],
     enemy: ["x", "y"],
     platform: ["x", "y", "length"],
     hazard: ["x", "y"],
@@ -317,7 +189,7 @@ function deserialize(text) {
         ++count > 10000 ||
         typeof o.id !== "string" ||
         ids.has(o.id) ||
-        o.type !== types[g]
+        (g === "geometry_operations" ? !validRectangle(o) : o.type !== types[g])
       )
         throw Error("Invalid, duplicate, or excessive objects.");
       ids.add(o.id);
@@ -372,8 +244,8 @@ function validate(room) {
   const errors = [],
     warnings = [],
     s = room.settings,
-    geo = [...room.corridors, ...room.shafts],
-    rs = geo.map((o) => rect(room, o)),
+    geo = room.geometry_operations,
+    rs = finalGeometry(room),
     adj = rs.map(() => []);
   const fail = (code, message) => errors.push({ code, message });
   const warn = (code, message) => warnings.push({ code, message });
@@ -392,61 +264,13 @@ function validate(room) {
       "provisional_door",
       "Door width/anchor are project-specific unresolved values, not canon.",
     );
-  room.corridors.forEach((o) => {
-    if (o.height !== s.corridor_height)
-      fail("corridor_height", `${o.id}: corridor height mismatch.`);
-    if (o.y !== floorY(room, o.floor) - s.corridor_height)
-      fail("floor_alignment", `${o.id}: same-floor alignment mismatch.`);
-    if (!Number.isInteger(o.floor) || o.floor < 0 || o.floor >= s.floors)
-      fail("floor", `${o.id}: invalid floor.`);
+  geo.forEach(o => {
+    if (!validRectangle(o)) fail("rectangle", `${o.id}: invalid or zero-size rectangle.`);
+    const r=rect(room,o);
+    if (r.x<0||r.y<0||r.x+r.w>s.width||r.y+r.h>s.height) fail("bounds", `${o.id}: outside room bounds.`);
+    if ([r.x,r.y,r.w,r.h].some(v=>Math.abs(v/s.grid_step-Math.round(v/s.grid_step))>1e-8)) warn("grid", `${o.id}: geometry is not grid snapped.`);
   });
-  geo.forEach((o, i) => {
-    const r = rs[i];
-    if (r.x < 0 || r.y < 0 || r.x + r.w > s.width || r.y + r.h > s.height)
-      fail("bounds", `${o.id}: outside room bounds.`);
-    if (
-      [r.x, r.w].some(
-        (v) => Math.abs(v / s.grid_step - Math.round(v / s.grid_step)) > 1e-8,
-      )
-    )
-      warn("grid", `${o.id}: horizontal geometry is not grid snapped.`);
-    for (let j = 0; j < i; j++) {
-      if (connected(r, rs[j])) {
-        adj[i].push(j);
-        adj[j].push(i);
-      }
-      if (JSON.stringify(r) === JSON.stringify(rs[j]))
-        warn("duplicate_geometry", `${o.id}: duplicate overlapping geometry.`);
-    }
-  });
-  room.shafts.forEach((o) => {
-    const expectedY = floorY(room, o.to_floor) - s.corridor_height;
-    if (
-      !Number.isInteger(o.from_floor) ||
-      !Number.isInteger(o.to_floor) ||
-      o.from_floor < 0 ||
-      o.to_floor >= s.floors ||
-      o.from_floor >= o.to_floor ||
-      o.y !== expectedY ||
-      o.height !== floorY(room, o.from_floor) - expectedY
-    )
-      fail(
-        "shaft_alignment",
-        `${o.id}: shaft must connect two exact floor levels.`,
-      );
-    for (const f of [o.from_floor, o.to_floor])
-      if (
-        !room.corridors.some(
-          (c) =>
-            c.floor === f &&
-            Math.min(c.x + c.length, o.x + o.width) > Math.max(c.x, o.x),
-        )
-      )
-        fail(
-          "shaft_connection",
-          `${o.id}: no corridor at endpoint floor ${f}.`,
-        );
-  });
+  rs.forEach((r,i)=> { for(let j=0;j<i;j++) if(connected(r,rs[j])) {adj[i].push(j);adj[j].push(i);} });
   function doorNodes(d) {
     const h = d.height_world_units / s.units_per_cell,
       y = d.y;
@@ -482,13 +306,7 @@ function validate(room) {
         "door_side",
         `${d.role}: must be on the ${d.role === "entry" ? "left" : "right"} room boundary.`,
       );
-    if (
-      !Number.isInteger(d.floor) ||
-      d.floor < 0 ||
-      d.floor >= s.floors ||
-      d.y !== floorY(room, d.floor) - d.height_world_units / s.units_per_cell
-    )
-      fail("door_floor", `${d.role}: invalid floor/position.`);
+    if (!Number.isFinite(d.y)||d.y<0||d.y+d.height_world_units/s.units_per_cell>s.height) fail("door_bounds", `${d.role}: outside room bounds.`);
     const n = doorNodes(d);
     nodes.set(d.id, n);
     if (!n.length)
@@ -516,28 +334,28 @@ function validate(room) {
     exit.length === 1 &&
     (nodes.get(exit[0].id) ?? []).some((i) => reached.has(i));
   if (!path) fail("path", "No continuous Entry → Exit path.");
-  if (geo.length && flood([0]).size !== geo.length)
+  if (rs.length && flood([0]).size !== rs.length)
     fail("island", "Disconnected traversable islands detected.");
-  if (reached.size < geo.length)
+  if (reached.size < rs.length)
     warn(
       "unreachable",
-      `${geo.length - reached.size} geometry object(s) unreachable from entry.`,
+      `${rs.length - reached.size} final region(s) unreachable from entry.`,
     );
   const doorIndices = new Set([...nodes.values()].flat());
   adj.forEach((ns, i) => {
     if (ns.length <= 1 && !doorIndices.has(i))
       warn(
         "dead_end",
-        `${geo[i].id}: potential dead-end branch (object graph heuristic).`,
+        `Region ${i+1}: potential dead-end branch (object graph heuristic).`,
       );
   });
   room.enemies.forEach((o) => {
-    if (!rs.some((r) => inside(o, r)))
+    if (!traversable(room, o))
       warn("enemy_outside", `${o.label}: enemy outside traversable geometry.`);
   });
   for (const g of ["platforms", "hazards", "annotations"])
     room[g].forEach((o) => {
-      if (o.x < 0 || o.x > s.width || o.y < 0 || o.y > s.height)
+      if (o.x < 0 || o.x > s.width || o.y < 0 || o.y > s.height || (o.type === "platform" && o.x + o.length > s.width))
         warn("marker_bounds", `${o.type}: outside room bounds.`);
     });
   return { valid: errors.length === 0, path, errors, warnings };
@@ -561,7 +379,6 @@ function scene(
   room,
   {
     grid = false,
-    floors = false,
     bounds = false,
     coordinates = false,
     selected = null,
@@ -571,8 +388,7 @@ function scene(
     out = [`<rect width="${s.width}" height="${s.height}" fill="black"/>`];
   const box = (r, fill, extra = "") =>
     `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${fill}" ${extra}/>`;
-  for (const o of [...room.corridors, ...room.shafts])
-    out.push(box(rect(room, o), "white"));
+  for (const r of finalGeometry(room)) out.push(box(r, "white"));
   if (grid) {
     const step =
       s.grid_step *
@@ -586,13 +402,6 @@ function scene(
         `<path d="M0 ${y}H${s.width}" stroke="#687580" stroke-opacity=".28" stroke-width=".025"/>`,
       );
   }
-  if (floors)
-    for (let f = 0; f < s.floors; f++) {
-      const y = floorY(room, f);
-      out.push(
-        `<path d="M0 ${y}H${s.width}" stroke="#64bba5" stroke-width=".045" stroke-dasharray=".3 .3"/><text x=".3" y="${y - 0.15}" fill="#299f82" font-size=".55">Floor ${f}</text>`,
-      );
-    }
   for (const d of room.doors) {
     const r = rect(room, d);
     out.push(box(r, d.role === "entry" ? "#247be5" : "#9149d8"));
@@ -626,11 +435,11 @@ function scene(
           `stroke="${o.id === selected ? "#ffb347" : "#719ba6"}" stroke-width=".07" stroke-dasharray=".2 .12"`,
         ),
       );
-      if (o.id === selected && o.type === "corridor") {
+      if (o.id === selected && ["carve", "fill"].includes(o.type)) {
         const r = rect(room, o);
         out.push(
           box(
-            { x: r.x + r.w - 0.2, y: r.y + r.h / 2 - 0.25, w: 0.4, h: 0.5 },
+            { x: r.x + r.w - 0.2, y: r.y + r.h - 0.2, w: 0.4, h: 0.4 },
             "#ffb347",
           ),
         );
@@ -693,8 +502,8 @@ async function exportPNG(room, overlays) {
 // ----- src/tools.js -----
 const toolList = [
   ["select", "Select", "V"],
-  ["corridor", "Corridor", "C"],
-  ["shaft", "Shaft", "S"],
+  ["carve", "Carve Space", "C"],
+  ["fill", "Fill Geometry", "F"],
   ["entry", "Entry door", "I"],
   ["exit", "Exit door", "O"],
   ["enemy", "Enemy", "E"],
@@ -752,13 +561,12 @@ function installTools(editor) {
         ({ object: o }) => o.id === editor.selected,
       )?.object;
       const selectedRect =
-        current?.type === "corridor" ? rect(editor.room, current) : null;
+        ["carve", "fill"].includes(current?.type) ? rect(editor.room, current) : null;
       const position = raw(e);
       const onHandle =
         selectedRect &&
         Math.abs(position.x - selectedRect.x - selectedRect.w) < 0.45 &&
-        position.y >= selectedRect.y &&
-        position.y <= selectedRect.y + selectedRect.h;
+        Math.abs(position.y - selectedRect.y - selectedRect.h) < 0.45;
       const o = tool === "select" && onHandle ? current : hit(position);
       editor.selected = o?.id ?? null;
       if (tool === "erase") {
@@ -770,7 +578,7 @@ function installTools(editor) {
         const r = rect(editor.room, o);
         drag = {
           mode:
-            o.type === "corridor" && Math.abs(raw(e).x - (r.x + r.w)) < 0.45
+            onHandle
               ? "resize"
               : "move",
           start: p,
@@ -780,34 +588,18 @@ function installTools(editor) {
       }
       return;
     }
-    if (["corridor", "shaft", "platform"].includes(tool)) {
+    if (["carve", "fill", "platform"].includes(tool)) {
       drag = { mode: tool, start: p, before: clone(editor.room) };
       return;
     }
     if (tool === "entry" || tool === "exit") {
-      const floor = nearestFloor(editor.room, p.y),
-        s = editor.room.settings,
-        x = tool === "entry" ? 0 : s.width;
-      const y = floorY(editor.room, floor) - 270 / s.units_per_cell;
-      if (
-        !editor.room.corridors.some(
-          (c) =>
-            c.floor === floor &&
-            (tool === "entry" ? c.x === 0 : c.x + c.length === s.width) &&
-            c.height >= 270 / s.units_per_cell,
-        )
-      ) {
-        editor.message(
-          "Place doors on a boundary corridor with 270-unit clearance.",
-        );
-        return;
-      }
+      const s=editor.room.settings, x=tool === "entry" ? 0:s.width, y=p.y;
+      // The click selects the snapped top of the opening. Validation checks full clearance.
       editor.change((room) => {
         room.doors.push({
           id: uid(),
           type: "door",
           role: tool,
-          floor,
           x,
           y,
           height_world_units: 270,
@@ -836,7 +628,7 @@ function installTools(editor) {
     const p = snap(raw(e)),
       u = editor.room.settings.units_per_cell;
     document.querySelector("#cursor").textContent =
-      `Grid ${p.x}, ${p.y} · World ${p.x * u}, ${p.y * u} · Floor ${nearestFloor(editor.room, p.y)}`;
+      `Grid ${p.x}, ${p.y} · World ${p.x * u}, ${p.y * u}`;
     if (!drag) return;
     if (drag.mode === "pan") {
       editor.view.x = drag.view.x + e.clientX - drag.client.x;
@@ -851,23 +643,16 @@ function installTools(editor) {
       ).object;
       if (drag.mode === "move")
         move(editor.room, o, p.x - drag.start.x, p.y - drag.start.y);
-      else o.length = Math.max(editor.room.settings.grid_step, p.x - o.x);
+      else {
+        o.width=Math.max(editor.room.settings.grid_step,p.x-o.x);
+        o.height=Math.max(editor.room.settings.grid_step,p.y-o.y);
+      }
       editor.render(false);
       return;
     }
     let o;
-    if (drag.mode === "corridor")
-      o = corridor(
-        editor.room,
-        Math.min(p.x, drag.start.x),
-        Math.max(editor.room.settings.grid_step, Math.abs(p.x - drag.start.x)),
-        nearestFloor(editor.room, drag.start.y),
-      );
-    if (drag.mode === "shaft") {
-      const from = nearestFloor(editor.room, drag.start.y),
-        to = nearestFloor(editor.room, p.y);
-      if (from !== to) o = shaft(editor.room, drag.start.x, from, to);
-    }
+    if (["carve","fill"].includes(drag.mode) && p.x !== drag.start.x && p.y !== drag.start.y)
+      o=geometry(drag.mode, Math.min(p.x,drag.start.x), Math.min(p.y,drag.start.y),Math.abs(p.x-drag.start.x),Math.abs(p.y-drag.start.y));
     if (drag.mode === "platform")
       o = {
         type: "platform",
@@ -896,7 +681,7 @@ function installTools(editor) {
       editor.change((room) => {
         const o = { ...d.object, id: uid() };
         room[
-          { corridor: "corridors", shaft: "shafts", platform: "platforms" }[
+          { carve: "geometry_operations", fill: "geometry_operations", platform: "platforms" }[
             d.mode
           ]
         ].push(o);
@@ -962,9 +747,7 @@ function installTools(editor) {
           ({ object: o }) => o.id === editor.selected,
         )?.object;
         if (o) {
-          const vertical = ["corridor", "shaft", "door"].includes(o.type)
-            ? room.settings.pitch
-            : step;
+          const vertical = step;
           move(
             room,
             o,
@@ -998,16 +781,12 @@ function installTools(editor) {
 // Generated by scripts/build-portable.mjs from examples/*.json.
 const exampleRooms = {
   "TW-01": {
-    "schema_version": 1,
+    "schema_version": 2,
     "room_id": "TW-01",
     "room_family": "TW",
     "settings": {
       "width": 48,
       "height": 32,
-      "floors": 4,
-      "pitch": 7,
-      "corridor_height": 3,
-      "shaft_width": 3,
       "units_per_cell": 90,
       "grid_step": 1,
       "export_scale": 2
@@ -1017,77 +796,24 @@ const exampleRooms = {
       "width_world_units": null,
       "anchor_convention": null
     },
-    "corridors": [
-      {
-        "id": "1c533da6-c8c9-4358-9a40-42773916a703",
-        "type": "corridor",
-        "x": 0,
-        "length": 15,
-        "floor": 0,
-        "y": 27,
-        "height": 3
-      },
-      {
-        "id": "6aaa52dd-ac20-4fb1-adbf-6599aa395533",
-        "type": "corridor",
-        "x": 12,
-        "length": 15,
-        "floor": 1,
-        "y": 20,
-        "height": 3
-      },
-      {
-        "id": "8021a951-1a14-42b9-ac6c-5a1028c02888",
-        "type": "corridor",
-        "x": 24,
-        "length": 24,
-        "floor": 2,
-        "y": 13,
-        "height": 3
-      }
-    ],
-    "shafts": [
-      {
-        "id": "d137fc64-b908-4393-aa62-6c8adb83d900",
-        "type": "shaft",
-        "x": 12,
-        "width": 3,
-        "from_floor": 0,
-        "to_floor": 1,
-        "y": 20,
-        "height": 10
-      },
-      {
-        "id": "3f288592-1275-47d7-b9b6-a23f51fa0ee3",
-        "type": "shaft",
-        "x": 24,
-        "width": 3,
-        "from_floor": 1,
-        "to_floor": 2,
-        "y": 13,
-        "height": 10
-      }
-    ],
     "doors": [
       {
         "id": "entry",
         "type": "door",
         "role": "entry",
         "x": 0,
-        "floor": 0,
         "marker_width": 0.6,
         "height_world_units": 270,
-        "y": 27
+        "y": 25
       },
       {
         "id": "exit",
         "type": "door",
         "role": "exit",
         "x": 48,
-        "floor": 2,
         "marker_width": 0.6,
         "height_world_units": 270,
-        "y": 13
+        "y": 11
       }
     ],
     "enemies": [
@@ -1095,21 +821,21 @@ const exampleRooms = {
         "id": "enemy-0",
         "type": "enemy",
         "x": 7,
-        "y": 28.5,
+        "y": 28,
         "label": "G"
       },
       {
         "id": "enemy-1",
         "type": "enemy",
         "x": 20,
-        "y": 21.5,
+        "y": 20,
         "label": "F"
       },
       {
         "id": "enemy-2",
         "type": "enemy",
         "x": 39,
-        "y": 14.5,
+        "y": 13,
         "label": "B"
       }
     ],
@@ -1117,25 +843,71 @@ const exampleRooms = {
       {
         "id": "platform-1",
         "type": "platform",
-        "x": 12,
+        "x": 11,
         "y": 23,
-        "length": 3
+        "length": 4
       }
     ],
     "hazards": [],
-    "annotations": []
+    "annotations": [],
+    "geometry_operations": [
+      {
+        "id": "carve-0",
+        "type": "carve",
+        "x": 0,
+        "y": 25,
+        "width": 14,
+        "height": 5
+      },
+      {
+        "id": "carve-1",
+        "type": "carve",
+        "x": 11,
+        "y": 18,
+        "width": 4,
+        "height": 12
+      },
+      {
+        "id": "carve-2",
+        "type": "carve",
+        "x": 11,
+        "y": 18,
+        "width": 17,
+        "height": 4
+      },
+      {
+        "id": "carve-3",
+        "type": "carve",
+        "x": 24,
+        "y": 9,
+        "width": 5,
+        "height": 13
+      },
+      {
+        "id": "carve-4",
+        "type": "carve",
+        "x": 24,
+        "y": 9,
+        "width": 24,
+        "height": 6
+      },
+      {
+        "id": "trim",
+        "type": "fill",
+        "x": 32,
+        "y": 9,
+        "width": 8,
+        "height": 2
+      }
+    ]
   },
   "TW-02": {
-    "schema_version": 1,
+    "schema_version": 2,
     "room_id": "TW-02",
     "room_family": "TW",
     "settings": {
       "width": 48,
       "height": 32,
-      "floors": 4,
-      "pitch": 7,
-      "corridor_height": 3,
-      "shaft_width": 3,
       "units_per_cell": 90,
       "grid_step": 1,
       "export_scale": 2
@@ -1145,144 +917,24 @@ const exampleRooms = {
       "width_world_units": null,
       "anchor_convention": null
     },
-    "corridors": [
-      {
-        "id": "f710e911-d912-43eb-a03e-6faa1124a158",
-        "type": "corridor",
-        "x": 0,
-        "length": 12,
-        "floor": 0,
-        "y": 27,
-        "height": 3
-      },
-      {
-        "id": "8afe391b-e27d-4354-b4dd-237d1ee97902",
-        "type": "corridor",
-        "x": 9,
-        "length": 15,
-        "floor": 1,
-        "y": 20,
-        "height": 3
-      },
-      {
-        "id": "92baf2d5-108d-453e-93dc-9d7ffecb71d3",
-        "type": "corridor",
-        "x": 21,
-        "length": 15,
-        "floor": 2,
-        "y": 13,
-        "height": 3
-      },
-      {
-        "id": "55f59217-0ede-47d5-bd7d-b328917fef7d",
-        "type": "corridor",
-        "x": 33,
-        "length": 15,
-        "floor": 1,
-        "y": 20,
-        "height": 3
-      },
-      {
-        "id": "45d302e5-7420-47e6-8d9a-b1b8f4801ebf",
-        "type": "corridor",
-        "x": 14,
-        "length": 10,
-        "floor": 2,
-        "y": 13,
-        "height": 3
-      },
-      {
-        "id": "a710529e-a39e-43bf-a4b7-4a9429b645f8",
-        "type": "corridor",
-        "x": 21,
-        "length": 9,
-        "floor": 3,
-        "y": 6,
-        "height": 3
-      }
-    ],
-    "shafts": [
-      {
-        "id": "ad4f534a-6407-4087-bf62-4d06efc8d517",
-        "type": "shaft",
-        "x": 9,
-        "width": 3,
-        "from_floor": 0,
-        "to_floor": 1,
-        "y": 20,
-        "height": 10
-      },
-      {
-        "id": "a9b8fb9b-c344-419c-afbb-640efcc0d2de",
-        "type": "shaft",
-        "x": 21,
-        "width": 3,
-        "from_floor": 1,
-        "to_floor": 2,
-        "y": 13,
-        "height": 10
-      },
-      {
-        "id": "e8943a12-c08e-43c6-b869-8841e926445b",
-        "type": "shaft",
-        "x": 33,
-        "width": 3,
-        "from_floor": 1,
-        "to_floor": 2,
-        "y": 13,
-        "height": 10
-      },
-      {
-        "id": "a93bfe72-3d10-456f-beb7-563795d7f0e6",
-        "type": "shaft",
-        "x": 14,
-        "width": 3,
-        "from_floor": 1,
-        "to_floor": 2,
-        "y": 13,
-        "height": 10
-      },
-      {
-        "id": "a0afdea4-6f8b-41e7-8b8c-c90ed614aa11",
-        "type": "shaft",
-        "x": 21,
-        "width": 3,
-        "from_floor": 2,
-        "to_floor": 3,
-        "y": 6,
-        "height": 10
-      },
-      {
-        "id": "e16e8f54-e036-4414-a454-fb2e2fc699e5",
-        "type": "shaft",
-        "x": 27,
-        "width": 3,
-        "from_floor": 2,
-        "to_floor": 3,
-        "y": 6,
-        "height": 10
-      }
-    ],
     "doors": [
       {
         "id": "entry",
         "type": "door",
         "role": "entry",
         "x": 0,
-        "floor": 0,
         "marker_width": 0.6,
         "height_world_units": 270,
-        "y": 27
+        "y": 25
       },
       {
         "id": "exit",
         "type": "door",
         "role": "exit",
         "x": 48,
-        "floor": 1,
         "marker_width": 0.6,
         "height_world_units": 270,
-        "y": 20
+        "y": 18
       }
     ],
     "enemies": [
@@ -1290,28 +942,28 @@ const exampleRooms = {
         "id": "enemy-0",
         "type": "enemy",
         "x": 6,
-        "y": 28.5,
+        "y": 28,
         "label": "G"
       },
       {
         "id": "enemy-1",
         "type": "enemy",
         "x": 17,
-        "y": 21.5,
+        "y": 20,
         "label": "P"
       },
       {
         "id": "enemy-2",
         "type": "enemy",
         "x": 29,
-        "y": 14.5,
+        "y": 12,
         "label": "F"
       },
       {
         "id": "enemy-3",
         "type": "enemy",
         "x": 41,
-        "y": 21.5,
+        "y": 20,
         "label": "B"
       }
     ],
@@ -1319,13 +971,87 @@ const exampleRooms = {
       {
         "id": "platform-1",
         "type": "platform",
-        "x": 12,
+        "x": 9,
         "y": 23,
-        "length": 3
+        "length": 4
       }
     ],
     "hazards": [],
-    "annotations": []
+    "annotations": [],
+    "geometry_operations": [
+      {
+        "id": "carve-0",
+        "type": "carve",
+        "x": 0,
+        "y": 25,
+        "width": 12,
+        "height": 5
+      },
+      {
+        "id": "carve-1",
+        "type": "carve",
+        "x": 9,
+        "y": 17,
+        "width": 4,
+        "height": 13
+      },
+      {
+        "id": "carve-2",
+        "type": "carve",
+        "x": 9,
+        "y": 17,
+        "width": 16,
+        "height": 5
+      },
+      {
+        "id": "carve-3",
+        "type": "carve",
+        "x": 21,
+        "y": 10,
+        "width": 5,
+        "height": 12
+      },
+      {
+        "id": "carve-4",
+        "type": "carve",
+        "x": 21,
+        "y": 10,
+        "width": 16,
+        "height": 4
+      },
+      {
+        "id": "carve-5",
+        "type": "carve",
+        "x": 33,
+        "y": 10,
+        "width": 4,
+        "height": 12
+      },
+      {
+        "id": "carve-6",
+        "type": "carve",
+        "x": 33,
+        "y": 18,
+        "width": 15,
+        "height": 4
+      },
+      {
+        "id": "carve-7",
+        "type": "carve",
+        "x": 14,
+        "y": 11,
+        "width": 4,
+        "height": 10
+      },
+      {
+        "id": "carve-8",
+        "type": "carve",
+        "x": 14,
+        "y": 11,
+        "width": 11,
+        "height": 3
+      }
+    ]
   }
 };
 
@@ -1337,18 +1063,14 @@ const settingLabels = {
   height: "Room height (cells)",
   units_per_cell: "World units per cell (editor scale)",
   grid_step: "Snap/grid spacing (cells)",
-  corridor_height: "Corridor clear height (cells)",
-  shaft_width: "Default shaft width (cells)",
-  floors: "Visible floor count",
-  pitch: "Floor pitch (cells)",
   export_scale: "PNG scale (1× / 2× / 4×)",
 };
 const hints = {
-  select: "Select · drag to move · corridor right edge to resize",
-  corridor: "Drag left/right · start chooses the nearest floor",
-  shaft: "Drag from one floor to another · fixed width",
-  entry: "Click a floor · entry snaps to LEFT boundary",
-  exit: "Click a floor · exit snaps to RIGHT boundary",
+  select: "Select · drag to move · bottom-right handle to resize",
+  carve: "Drag a snapped rectangle to carve white space",
+  fill: "Drag a snapped rectangle to fill black geometry",
+  entry: "Click opening top · entry snaps to LEFT boundary",
+  exit: "Click opening top · exit snaps to RIGHT boundary",
   enemy: "Click white space · edit label in properties",
   platform: "Drag horizontally to create a one-way platform",
   hazard: "Click to place a hazard marker",
@@ -1374,7 +1096,7 @@ const editor = {
   },
   overlays() {
     return Object.fromEntries(
-      ["grid", "floors", "bounds", "coordinates"].map((k) => [k, $(k).checked]),
+      ["grid", "bounds", "coordinates"].map((k) => [k, $(k).checked]),
     );
   },
   camera() {
@@ -1533,7 +1255,7 @@ const editor = {
     $("setting-fields").innerHTML = Object.entries(settingLabels)
       .map(
         ([k, label]) =>
-          `<label>${label}${k === "export_scale" ? `<select name="${k}">${[1, 2, 4].map((v) => `<option ${s[k] === v ? "selected" : ""}>${v}</option>`).join("")}</select>` : `<input name="${k}" type="number" min="${["units_per_cell", "floors"].includes(k) ? 1 : 0.01}" step="${k === "floors" ? 1 : "any"}" value="${s[k]}" required>`}</label>`,
+          `<label>${label}${k === "export_scale" ? `<select name="${k}">${[1, 2, 4].map((v) => `<option ${s[k] === v ? "selected" : ""}>${v}</option>`).join("")}</select>` : `<input name="${k}" type="number" min="${k === "units_per_cell" ? 1 : 0.01}" step="${"any"}" value="${s[k]}" required>`}</label>`,
       )
       .join("");
     $("guidance").textContent = (
@@ -1548,7 +1270,7 @@ const editor = {
       objects(this.room)
         .map(
           ({ object: o }) =>
-            `<option value="${escapeXML(o.id)}" ${this.selected === o.id ? "selected" : ""}>${escapeXML(o.type)} ${escapeXML(o.role ?? o.label ?? (o.floor === undefined ? `F${o.from_floor}–${o.to_floor}` : `F${o.floor}`))} · ${escapeXML(o.id.slice(0, 8))}</option>`,
+            `<option value="${escapeXML(o.id)}" ${this.selected === o.id ? "selected" : ""}>${escapeXML(o.type)} ${escapeXML(o.role ?? o.label ?? `${o.x}, ${o.y}`)} · ${escapeXML(o.id.slice(0, 8))}</option>`,
         )
         .join("");
     const o = objects(this.room).find(
@@ -1560,9 +1282,9 @@ const editor = {
       return;
     }
     const keys = {
-      corridor: ["x", "floor", "length"],
-      shaft: ["x", "from_floor", "to_floor", "width"],
-      door: ["floor", "marker_width"],
+      carve: ["x", "y", "width", "height"],
+      fill: ["x", "y", "width", "height"],
+      door: ["y", "marker_width"],
       enemy: ["x", "y", "label"],
       platform: ["x", "y", "length"],
       hazard: ["x", "y", "label"],
@@ -1580,22 +1302,13 @@ const editor = {
           const value = k === "label" ? v : Number(v);
           if (k !== "label" && !Number.isFinite(value))
             throw Error("Properties must be finite numbers.");
-          if (["length", "width", "marker_width"].includes(k) && value <= 0)
+          if (["length", "width", "height", "marker_width"].includes(k) && value <= 0)
             throw Error("Dimensions must be positive.");
-          if (
-            ["floor", "from_floor", "to_floor"].includes(k) &&
-            (!Number.isInteger(value) ||
-              value < 0 ||
-              value >= room.settings.floors)
-          )
-            throw Error("Floor is outside the room.");
           target[k] = value;
         }
-        if (target.type === "shaft" && target.from_floor >= target.to_floor)
-          throw Error("Shaft end must be above its start floor.");
-        if (["corridor", "shaft", "platform"].includes(target.type)) {
+        if (["carve", "fill", "platform"].includes(target.type)) {
           const step = room.settings.grid_step;
-          for (const key of ["x", "length", "width"])
+          for (const key of ["x", "y", "length", "width", "height"])
             if (
               key in target &&
               Math.abs(target[key] / step - Math.round(target[key] / step)) >
@@ -1603,27 +1316,8 @@ const editor = {
             )
               throw Error(`${key} must be a multiple of grid spacing ${step}.`);
         }
-        if (target.type === "corridor")
-          Object.assign(target, {
-            ...corridor(room, target.x, target.length, target.floor),
-            id: target.id,
-          });
-        if (target.type === "shaft")
-          Object.assign(target, {
-            ...shaft(
-              room,
-              target.x,
-              target.from_floor,
-              target.to_floor,
-              target.width,
-            ),
-            id: target.id,
-          });
         if (target.type === "door") {
           target.x = target.role === "entry" ? 0 : room.settings.width;
-          target.y =
-            floorY(room, target.floor) -
-            target.height_world_units / room.settings.units_per_cell;
         }
       });
     };
@@ -1777,7 +1471,7 @@ $("reset").onclick = () => {
   editor.view = { scale: 20, x: 30, y: 50 };
   editor.camera();
 };
-for (const k of ["grid", "floors", "bounds", "coordinates"])
+for (const k of ["grid", "bounds", "coordinates"])
   $(k).onchange = () => editor.render(false);
 window.addEventListener("beforeunload", (e) => {
   if (editor.dirty) {
