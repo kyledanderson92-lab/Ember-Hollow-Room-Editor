@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "files": [
+    ".editor-public-files.json",
+    ".nojekyll",
+    "README.md",
+    "examples/TW-01.json",
+    "examples/TW-02.json",
+    "index.html",
+    "launch_editor.bat",
+    "launch_http.bat",
+    "portable.js",
+    "styles/editor.css"
+  ]
+}
