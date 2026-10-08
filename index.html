@@ -8,7 +8,7 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171e26'/%3E%3Ctext x='3' y='23' fill='%23ffb45f' font-size='19'%3EEH%3C/text%3E%3C/svg%3E"
     />
     <title>Ember Hollow · Room Blueprint Editor</title>
-    <link rel="stylesheet" href="styles/editor.css?v=area-copy-1" />
+    <link rel="stylesheet" href="styles/editor.css?v=cell-paint-1" />
   </head>
   <body>
     <header>
@@ -39,7 +39,7 @@
         <button id="flip-vertical" title="Mirror the entire room top to bottom">Flip Vertically</button>
         <h2>HISTORY</h2>
         <button id="undo">↶ Undo</button><button id="redo">↷ Redo</button>
-        <p>Drag snapped rectangles.<br />Carve white space; fill black geometry.</p>
+        <p>Click to paint one cell.<br />Drag to carve or fill a rectangle.</p>
       </aside>
       <section class="workspace">
         <div class="viewbar">
@@ -125,9 +125,7 @@
         </details>
         <details open>
           <summary>Guides & export</summary>
-          <label><input id="grid" type="checkbox" checked /> Show grid</label
-          ><label
-            ><input id="bounds" type="checkbox" /> Show object bounds</label
+          <label><input id="grid" type="checkbox" /> Show grid</label
           ><label
             ><input id="coordinates" type="checkbox" /> Show coordinates</label
           ><label
@@ -162,6 +160,6 @@
       ><span id="message" role="status" aria-live="polite"></span>
     </footer>
     <input id="file" type="file" accept=".json,application/json" hidden />
-    <script defer src="portable.js?v=area-copy-1"></script>
+    <script defer src="portable.js?v=cell-paint-1"></script>
   </body>
 </html>

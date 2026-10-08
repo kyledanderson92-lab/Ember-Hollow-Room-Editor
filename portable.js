@@ -398,7 +398,6 @@ function scene(
   room,
   {
     grid = false,
-    bounds = false,
     coordinates = false,
     selected = null,
   } = {},
@@ -407,7 +406,9 @@ function scene(
     out = [`<rect width="${s.width}" height="${s.height}" fill="black"/>`];
   const box = (r, fill, extra = "") =>
     `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${fill}" ${extra}/>`;
-  for (const r of finalGeometry(room)) out.push(box(r, "white"));
+  // One compound fill avoids antialiased seams between resolved rectangles.
+  const white = finalGeometry(room).map(r => `M${r.x} ${r.y}h${r.w}v${r.h}h${-r.w}Z`).join(" ");
+  if (white) out.push(`<path data-room-space="" d="${white}" fill="white" stroke="none" shape-rendering="crispEdges"/>`);
   if (grid) {
     const step =
       s.grid_step *
@@ -444,26 +445,13 @@ function scene(
     out.push(
       `<text x="${o.x}" y="${o.y}" fill="#28af61" font-size=".65">${escapeXML(o.label)}</text>`,
     );
-  if (bounds || selected)
-    for (const { object: o } of objects(room)) {
-      if (!bounds && o.id !== selected) continue;
-      out.push(
-        box(
-          rect(room, o),
-          "none",
-          `stroke="${o.id === selected ? "#ffb347" : "#719ba6"}" stroke-width=".07" stroke-dasharray=".2 .12"`,
-        ),
-      );
-      if (o.id === selected && ["carve", "fill"].includes(o.type)) {
-        const r = rect(room, o);
-        out.push(
-          box(
-            { x: r.x + r.w - 0.2, y: r.y + r.h - 0.2, w: 0.4, h: 0.4 },
-            "#ffb347",
-          ),
-        );
-      }
+  if (selected) {
+    const o = objects(room).find(({ object }) => object.id === selected)?.object;
+    if (o && ["carve", "fill"].includes(o.type)) {
+      const r = rect(room, o);
+      out.push(box({ x: r.x + r.w - 0.2, y: r.y + r.h - 0.2, w: 0.4, h: 0.4 }, "#ffb347"));
     }
+  }
   if (coordinates)
     for (let x = 0; x < s.width; x += Math.max(s.grid_step, 5))
       out.push(
@@ -626,6 +614,12 @@ function installTools(editor) {
       y: Math.round(p.y / step) * step,
     };
   };
+  const cellAt = (p) => {
+    const step = editor.room.settings.grid_step;
+    const x = Math.floor(p.x / step) * step, y = Math.floor(p.y / step) * step;
+    if (x < 0 || y < 0 || x + step > editor.room.settings.width || y + step > editor.room.settings.height) return null;
+    return { x, y, width: step, height: step };
+  };
   const hit = (p) =>
     objects(editor.room)
       .reverse()
@@ -707,7 +701,10 @@ function installTools(editor) {
       return;
     }
     if (["carve", "fill", "platform"].includes(tool)) {
-      drag = { mode: tool, start: p, before: clone(editor.room) };
+      drag = { mode: tool, start: p, before: clone(editor.room),
+        client: { x: e.clientX, y: e.clientY }, cell: cellAt(raw(e)), moved: false };
+      if (["carve", "fill"].includes(tool) && drag.cell)
+        drag.object = geometry(tool, drag.cell.x, drag.cell.y, drag.cell.width, drag.cell.height);
       return;
     }
     if (tool === "entry" || tool === "exit") {
@@ -781,8 +778,16 @@ function installTools(editor) {
       return;
     }
     let o;
-    if (["carve","fill"].includes(drag.mode) && p.x !== drag.start.x && p.y !== drag.start.y)
-      o=geometry(drag.mode, Math.min(p.x,drag.start.x), Math.min(p.y,drag.start.y),Math.abs(p.x-drag.start.x),Math.abs(p.y-drag.start.y));
+    if (["carve", "fill"].includes(drag.mode)) {
+      // A few screen pixels of hand jitter must not turn a click into a drag.
+      drag.moved ||= Math.hypot(e.clientX - drag.client.x, e.clientY - drag.client.y) > 4;
+      if (!drag.moved && drag.cell) o = geometry(drag.mode, drag.cell.x, drag.cell.y, drag.cell.width, drag.cell.height);
+      else if (drag.moved) {
+        const step = editor.room.settings.grid_step;
+        o = geometry(drag.mode, Math.min(p.x, drag.start.x), Math.min(p.y, drag.start.y),
+          Math.max(step, Math.abs(p.x - drag.start.x)), Math.max(step, Math.abs(p.y - drag.start.y)));
+      }
+    }
     if (drag.mode === "platform")
       o = {
         type: "platform",
@@ -801,7 +806,17 @@ function installTools(editor) {
       );
     } else editor.preview("");
   });
-  svg.addEventListener("pointerup", () => {
+  svg.addEventListener("pointerup", (e) => {
+    if (drag && ["carve", "fill"].includes(drag.mode)) {
+      drag.moved ||= Math.hypot(e.clientX - drag.client.x, e.clientY - drag.client.y) > 4;
+      if (!drag.moved) drag.object = drag.cell
+        ? geometry(drag.mode, drag.cell.x, drag.cell.y, drag.cell.width, drag.cell.height) : null;
+      else {
+        const p = snap(raw(e)), step = editor.room.settings.grid_step;
+        drag.object = geometry(drag.mode, Math.min(p.x, drag.start.x), Math.min(p.y, drag.start.y),
+          Math.max(step, Math.abs(p.x - drag.start.x)), Math.max(step, Math.abs(p.y - drag.start.y)));
+      }
+    }
     if (!drag) return;
     const d = drag;
     drag = null;
@@ -1222,8 +1237,8 @@ const hints = {
   select: "Select · drag to move · bottom-right handle to resize",
   area: "Drag a grid rectangle to copy its cells and markers; doors stay fixed",
   paste: "Click to place the copy at its top-left · repeat to stamp · Escape to cancel",
-  carve: "Drag a snapped rectangle to carve white space",
-  fill: "Drag a snapped rectangle to fill black geometry",
+  carve: "Click a cell to carve white · drag for a rectangle",
+  fill: "Click a cell to fill black · drag for a rectangle",
   entry: "Click opening top · entry snaps to LEFT boundary",
   exit: "Click opening top · exit snaps to RIGHT boundary",
   enemy: "Click white space · edit label in properties",
@@ -1253,7 +1268,7 @@ const editor = {
   },
   overlays() {
     return Object.fromEntries(
-      ["grid", "bounds", "coordinates"].map((k) => [k, $(k).checked]),
+      ["grid", "coordinates"].map((k) => [k, $(k).checked]),
     );
   },
   camera() {
@@ -1657,7 +1672,7 @@ $("reset").onclick = () => {
   editor.view = { scale: 20, x: 30, y: 50 };
   editor.camera();
 };
-for (const k of ["grid", "bounds", "coordinates"])
+for (const k of ["grid", "coordinates"])
   $(k).onchange = () => editor.render(false);
 window.addEventListener("beforeunload", (e) => {
   if (editor.dirty) {
