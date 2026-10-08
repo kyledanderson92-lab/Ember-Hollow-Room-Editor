@@ -49,3 +49,9 @@ git -C ../Ember-Hollow-Room-Editor push origin main
 ```
 
 GitHub Pages serves the public `main` branch root; pushed updates redeploy automatically. `.editor-public-files.json` records the complete allowed public file set. No private game code, assets, documents or Git history belong in this distribution.
+
+## Flip the entire room
+
+Use **Flip Horizontally** or **Flip Vertically** under ROOM in the left toolbar. A flip mirrors all carve/fill operations and markers within the current bounds, preserving operation order and IDs. Platform spans and complete 270-world-unit door openings are mirrored correctly. Horizontal flips swap entry/exit roles so entry remains on the left and exit on the right. Enemy letters and annotation text remain readable. Each flip is one Undo step and autosaves like other edits; save JSON to keep a portable copy.
+
+Enemy identifier buttons show full names in visible editor-rendered tooltips on hover or keyboard focus.

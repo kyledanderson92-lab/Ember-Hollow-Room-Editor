@@ -92,6 +92,25 @@ function updateSettings(room,next) {
   return candidate;
 }
 
+// Mirror the authored model within its bounds, preserving operation order/IDs.
+// Door roles follow the left-entry/right-exit contract after a horizontal flip.
+function flipRoom(room, axis) {
+  if (!["horizontal", "vertical"].includes(axis)) throw Error("Invalid flip axis.");
+  const { width, height, units_per_cell } = room.settings;
+  for (const { object: o } of objects(room)) {
+    if (axis === "horizontal") {
+      if (["carve", "fill"].includes(o.type)) o.x = width - o.x - o.width;
+      else if (o.type === "platform") o.x = width - o.x - o.length;
+      else o.x = width - o.x;
+      if (o.type === "door") o.role = o.role === "entry" ? "exit" : "entry";
+    } else {
+      const extent = ["carve", "fill"].includes(o.type) ? o.height
+        : o.type === "door" ? o.height_world_units / units_per_cell : 0;
+      o.y = height - o.y - extent;
+    }
+  }
+}
+
 
 // ----- src/history.js -----
 class History {
@@ -1473,6 +1492,13 @@ $("undo").onclick = () => editor.undo();
 $("redo").onclick = () => editor.redo();
 $("delete").onclick = () => editor.remove();
 $("duplicate").onclick = () => editor.duplicate();
+for (const axis of ["horizontal", "vertical"]) {
+  $(`flip-${axis}`).onclick = () => {
+    editor.cancel?.();
+    editor.change(room => flipRoom(room, axis));
+    editor.message(`Room flipped ${axis === "horizontal" ? "horizontally; entry and exit roles swapped" : "vertically"}. Undo restores the previous layout.`);
+  };
+}
 $("fit").onclick = () => editor.fit();
 $("reset").onclick = () => {
   editor.view = { scale: 20, x: 30, y: 50 };

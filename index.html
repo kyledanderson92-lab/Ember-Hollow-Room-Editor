@@ -8,7 +8,7 @@
       href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23171e26'/%3E%3Ctext x='3' y='23' fill='%23ffb45f' font-size='19'%3EEH%3C/text%3E%3C/svg%3E"
     />
     <title>Ember Hollow · Room Blueprint Editor</title>
-    <link rel="stylesheet" href="styles/editor.css?v=enemy-tooltips-2" />
+    <link rel="stylesheet" href="styles/editor.css?v=room-flips-1" />
   </head>
   <body>
     <header>
@@ -34,6 +34,9 @@
       <aside class="toolbar">
         <h2>BUILD</h2>
         <div id="tools"></div>
+        <h2>ROOM</h2>
+        <button id="flip-horizontal" title="Mirror the entire room left to right; swap entry/exit roles">Flip Horizontally</button>
+        <button id="flip-vertical" title="Mirror the entire room top to bottom">Flip Vertically</button>
         <h2>HISTORY</h2>
         <button id="undo">↶ Undo</button><button id="redo">↷ Redo</button>
         <p>Drag snapped rectangles.<br />Carve white space; fill black geometry.</p>
@@ -159,6 +162,6 @@
       ><span id="message" role="status" aria-live="polite"></span>
     </footer>
     <input id="file" type="file" accept=".json,application/json" hidden />
-    <script defer src="portable.js?v=enemy-tooltips-2"></script>
+    <script defer src="portable.js?v=room-flips-1"></script>
   </body>
 </html>
