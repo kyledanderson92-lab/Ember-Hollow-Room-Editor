@@ -1298,7 +1298,7 @@ const editor = {
       annotation: ["x", "y", "label"],
     }[o.type];
     $("selection").innerHTML =
-      `<p>${escapeXML(o.type)}${o.role ? " · " + o.role : ""}</p><form id="object-form">${keys.map((k) => `<label>${escapeXML(k.replaceAll("_", " "))}<input name="${k}" type="${k === "label" ? "text" : "number"}" step="any" value="${escapeXML(o[k])}" required></label>`).join("")}<button>Apply object changes</button></form>${o.type === "enemy" ? '<div class="button-row">' + Object.entries(enemyNames).map(([l, name]) => `<button type="button" data-label="${l}" title="${escapeXML(name)}" aria-label="${l}: ${escapeXML(name)}">${l}</button>`).join("") + "</div>" : ""}${o.type === "door" ? "<p>Marker width is measured in grid cells and has no canonical opening-width meaning.</p>" : ""}`;
+      `<p>${escapeXML(o.type)}${o.role ? " · " + o.role : ""}</p><form id="object-form">${keys.map((k) => `<label>${escapeXML(k.replaceAll("_", " "))}<input name="${k}" type="${k === "label" ? "text" : "number"}" step="any" value="${escapeXML(o[k])}" required></label>`).join("")}<button>Apply object changes</button></form>${o.type === "enemy" ? '<div class="button-row enemy-labels">' + Object.entries(enemyNames).map(([l, name]) => `<button type="button" data-label="${l}" aria-label="${l}: ${escapeXML(name)}">${l}<span class="enemy-tooltip" aria-hidden="true">${escapeXML(name)}</span></button>`).join("") + "</div>" : ""}${o.type === "door" ? "<p>Marker width is measured in grid cells and has no canonical opening-width meaning.</p>" : ""}`;
     $("object-form").onsubmit = (e) => {
       e.preventDefault();
       this.change((room) => {

@@ -299,3 +299,32 @@ footer {
     flex-wrap: wrap;
   }
 }
+
+/* Editor-rendered tooltips work in embedded browsers without native title UI.
+   Anchor to the row so names cannot spill beyond the narrow properties panel. */
+.enemy-labels {
+  position: relative;
+}
+.enemy-tooltip {
+  display: none;
+  position: absolute;
+  left: 0;
+  bottom: calc(100% + 6px);
+  max-width: 100%;
+  padding: 7px 10px;
+  border: 1px solid #738395;
+  border-radius: 4px;
+  background: #10151b;
+  color: #f3b15d;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: left;
+  pointer-events: none;
+  z-index: 10;
+  box-shadow: 0 3px 12px #0008;
+}
+.enemy-labels button:hover .enemy-tooltip,
+.enemy-labels button:focus-visible .enemy-tooltip {
+  display: block;
+}
