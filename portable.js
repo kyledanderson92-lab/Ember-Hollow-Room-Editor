@@ -49,7 +49,9 @@ function rect(room, o) {
   if (o.type === "door") return { x:o.x-(o.role === "exit" ? o.marker_width : 0), y:o.y, w:o.marker_width, h:o.height_world_units/room.settings.units_per_cell };
   return {x:o.x-.35,y:o.y-.35,w:o.type === "platform" ? o.length : .7,h:.7};
 }
-const objects = room => groups.flatMap(group => room[group].map(object => ({group,object})));
+// Geometry is finalized paint, not selectable objects. Rectangles are only a
+// compact lossless encoding of white space; black is the implicit background.
+const objects = room => groups.filter(g => g !== "geometry_operations").flatMap(group => room[group].map(object => ({group,object})));
 const inside = (p,r) => p.x >= r.x && p.x <= r.x+r.w && p.y >= r.y && p.y <= r.y+r.h;
 // Exact rectangle difference. Shared edges have zero area; no sampling/rasterization.
 function subtract(a,b) {
@@ -77,6 +79,53 @@ function finalGeometry(room) {
   return regions;
 }
 const traversable = (room,p) => finalGeometry(room).some(r=>p.x>=r.x && p.x<r.x+r.w && p.y>=r.y && p.y<r.y+r.h);
+
+// Flatten legacy paint stacks and merge adjacent white spans. A deterministic
+// encoding makes repainting the same cells a no-op and keeps history compact.
+// Exact coordinates preserve old fractional-cell files without resampling.
+function finalizeGeometry(room) {
+  const regions = finalGeometry(room);
+  const ys = [...new Set(regions.flatMap(r => [r.y, r.y + r.h]))].sort((a,b) => a-b);
+  const result = [];
+  let previous = new Map();
+  for (let i=0; i<ys.length-1; i++) {
+    const y=ys[i], bottom=ys[i+1];
+    const spans = regions.filter(r => r.y <= y && r.y+r.h >= bottom)
+      .map(r => [r.x, r.x+r.w]).sort((a,b) => a[0]-b[0]);
+    const merged = [];
+    for (const [left,right] of spans) {
+      const last=merged.at(-1);
+      if (last && left <= last[1]) last[1]=Math.max(last[1],right);
+      else merged.push([left,right]);
+    }
+    const next=new Map();
+    for (const [left,right] of merged) {
+      const key=`${left}:${right}`, existing=previous.get(key);
+      const r=existing ?? {x:left,y,width:right-left,height:0};
+      r.height=bottom-r.y;
+      if (!existing) result.push(r);
+      next.set(key,r);
+    }
+    previous=next;
+  }
+  const reserved=new Set(objects(room).map(({object}) => object.id));
+  room.geometry_operations=result.map(r => {
+    let id=`space:${r.x}:${r.y}:${r.width}:${r.height}`;
+    while (reserved.has(id)) id="space:"+id;
+    reserved.add(id);
+    return {id,type:"carve",...r};
+  });
+  return room;
+}
+
+function paintGeometry(room, type, x, y, width, height) {
+  const operation=geometry(type,x,y,width,height);
+  if (!validRectangle(operation)) throw Error("Paint requires a positive, finite rectangle.");
+  if (x<0 || y<0 || x+width>room.settings.width || y+height>room.settings.height)
+    throw Error("Paint must stay inside room bounds.");
+  room.geometry_operations.push(operation);
+  finalizeGeometry(room);
+}
 function move(room,o,dx,dy) {
   if (o.type !== "door") o.x+=dx;
   o.y+=dy;
@@ -92,12 +141,12 @@ function updateSettings(room,next) {
   return candidate;
 }
 
-// Mirror the authored model within its bounds, preserving operation order/IDs.
+// Mirror geometry and markers within bounds. Marker IDs remain unchanged.
 // Door roles follow the left-entry/right-exit contract after a horizontal flip.
 function flipRoom(room, axis) {
   if (!["horizontal", "vertical"].includes(axis)) throw Error("Invalid flip axis.");
   const { width, height, units_per_cell } = room.settings;
-  for (const { object: o } of objects(room)) {
+  for (const o of groups.flatMap(g => room[g])) {
     if (axis === "horizontal") {
       if (["carve", "fill"].includes(o.type)) o.x = width - o.x - o.width;
       else if (o.type === "platform") o.x = width - o.x - o.length;
@@ -229,7 +278,10 @@ function deserialize(text) {
         throw Error("Marker label must be text.");
     }
   }
-  return r;
+  // Validate first; malformed data must not disappear during flattening.
+  if (r.geometry_operations.some(o => o.x<0 || o.y<0 || o.x+o.width>s.width || o.y+o.height>s.height))
+    throw Error("Geometry must stay inside room bounds.");
+  return finalizeGeometry(r);
 }
 function download(data, name, type) {
   const url = URL.createObjectURL(new Blob([data], { type }));
@@ -399,7 +451,6 @@ function scene(
   {
     grid = false,
     coordinates = false,
-    selected = null,
   } = {},
 ) {
   const s = room.settings,
@@ -445,13 +496,6 @@ function scene(
     out.push(
       `<text x="${o.x}" y="${o.y}" fill="#28af61" font-size=".65">${escapeXML(o.label)}</text>`,
     );
-  if (selected) {
-    const o = objects(room).find(({ object }) => object.id === selected)?.object;
-    if (o && ["carve", "fill"].includes(o.type)) {
-      const r = rect(room, o);
-      out.push(box({ x: r.x + r.w - 0.2, y: r.y + r.h - 0.2, w: 0.4, h: 0.4 }, "#ffb347"));
-    }
-  }
   if (coordinates)
     for (let x = 0; x < s.width; x += Math.max(s.grid_step, 5))
       out.push(
@@ -560,6 +604,7 @@ function pasteArea(room, clip, point, { preserveIds = false } = {}) {
     room.geometry_operations.push({ ...clone(o), id: preserveIds ? o.id : uid(), x: o.x + area.x, y: o.y + area.y });
   for (const group of markerGroups)
     room[group].push(...clip[group].map(o => ({ ...clone(o), id: preserveIds ? o.id : uid(), x: o.x + area.x, y: o.y + area.y })));
+  finalizeGeometry(room);
 }
 
 // Shared patch replacement keeps Paste's existing clipping rules. When cutting,
@@ -618,6 +663,7 @@ const toolList = [
   ["area", "Copy Area", "R"],
   ["paste", "Place Copy", "T"],
   ["move", "Move", "M"],
+  ["paint", "Paint Cells", "B"],
   ["carve", "Carve Space", "C"],
   ["fill", "Fill Geometry", "F"],
   ["entry", "Entry door", "I"],
@@ -676,9 +722,12 @@ function installTools(editor) {
     editor.preview(`<g transform="translate(${p.x} ${p.y})" opacity=".8">${scene(areaPreviewRoom(clip, editor.room.settings))}<rect width="${clip.width}" height="${clip.height}" fill="none" stroke="${fits ? "#ffc77d" : "#f07878"}" stroke-width=".12" stroke-dasharray=".3 .2"/></g>`);
   }
   editor.refreshPaste = () => { if (["paste", "move"].includes(editor.tool) && hoverPoint) showPaste(hoverPoint); };
+  svg.addEventListener("contextmenu", e => e.preventDefault());
 
   svg.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0 && e.button !== 1) return;
+    if (![0, 1, 2].includes(e.button) || drag) return;
+    // Right-click paints only; it never places markers or copies.
+    if (e.button === 2 && editor.tool !== "paint") return;
     e.preventDefault();
     svg.setPointerCapture(e.pointerId);
     const p = snap(raw(e));
@@ -690,7 +739,9 @@ function installTools(editor) {
       };
       return;
     }
-    const tool = editor.tool;
+    const tool = editor.tool === "paint"
+      ? ((e.button === 2) !== editor.paintSwapped ? "carve" : "fill")
+      : editor.tool;
     if (["paste", "move"].includes(tool)) {
       if (tool === "move") editor.placeMove(p);
       else editor.placeCopy(p);
@@ -704,30 +755,20 @@ function installTools(editor) {
       return;
     }
     if (tool === "select" || tool === "erase") {
-      const current = objects(editor.room).find(
-        ({ object: o }) => o.id === editor.selected,
-      )?.object;
-      const selectedRect =
-        ["carve", "fill"].includes(current?.type) ? rect(editor.room, current) : null;
-      const position = raw(e);
-      const onHandle =
-        selectedRect &&
-        Math.abs(position.x - selectedRect.x - selectedRect.w) < 0.45 &&
-        Math.abs(position.y - selectedRect.y - selectedRect.h) < 0.45;
-      const o = tool === "select" && onHandle ? current : hit(position);
+      const o = hit(raw(e));
       editor.selected = o?.id ?? null;
       if (tool === "erase") {
         if (o) editor.remove();
+        else {
+          drag = { mode: "fill", start: p, before: clone(editor.room),
+            client: {x:e.clientX,y:e.clientY}, cell:cellAt(raw(e)), moved:false };
+        }
         return;
       }
       editor.render();
       if (o) {
-        const r = rect(editor.room, o);
         drag = {
-          mode:
-            onHandle
-              ? "resize"
-              : "move",
+          mode: "move",
           start: p,
           id: o.id,
           before: clone(editor.room),
@@ -736,7 +777,7 @@ function installTools(editor) {
       return;
     }
     if (["carve", "fill", "platform"].includes(tool)) {
-      drag = { mode: tool, start: p, before: clone(editor.room),
+      drag = { mode: tool, button: e.button, start: p, before: clone(editor.room),
         client: { x: e.clientX, y: e.clientY }, cell: cellAt(raw(e)), moved: false };
       if (["carve", "fill"].includes(tool) && drag.cell)
         drag.object = geometry(tool, drag.cell.x, drag.cell.y, drag.cell.width, drag.cell.height);
@@ -798,17 +839,10 @@ function installTools(editor) {
       editor.camera();
       return;
     }
-    if (drag.mode === "move" || drag.mode === "resize") {
+    if (drag.mode === "move") {
       editor.room = clone(drag.before);
-      const o = objects(editor.room).find(
-        ({ object: o }) => o.id === drag.id,
-      ).object;
-      if (drag.mode === "move")
-        move(editor.room, o, p.x - drag.start.x, p.y - drag.start.y);
-      else {
-        o.width=Math.max(editor.room.settings.grid_step,p.x-o.x);
-        o.height=Math.max(editor.room.settings.grid_step,p.y-o.y);
-      }
+      const o = objects(editor.room).find(({ object }) => object.id === drag.id).object;
+      move(editor.room, o, p.x - drag.start.x, p.y - drag.start.y);
       editor.render(false);
       return;
     }
@@ -837,11 +871,12 @@ function installTools(editor) {
     if (o) {
       const r = rect(editor.room, o);
       editor.preview(
-        `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="#f3b15d" opacity=".5" stroke="#ffc77d" stroke-width=".06"/>`,
+        `<rect x="${r.x}" y="${r.y}" width="${r.w}" height="${r.h}" fill="${drag.mode === "carve" ? "white" : drag.mode === "fill" ? "black" : "#f3b15d"}" opacity=".5" stroke="#ffc77d" stroke-width=".06"/>`,
       );
     } else editor.preview("");
   });
   svg.addEventListener("pointerup", (e) => {
+    if (drag?.button != null && e.button !== drag.button) return;
     if (drag && ["carve", "fill"].includes(drag.mode)) {
       drag.moved ||= Math.hypot(e.clientX - drag.client.x, e.clientY - drag.client.y) > 4;
       if (!drag.moved) drag.object = drag.cell
@@ -860,15 +895,16 @@ function installTools(editor) {
       if (d.area?.width > 0 && d.area?.height > 0) editor.captureArea(d.area);
       return;
     }
-    if (d.mode === "move" || d.mode === "resize") editor.commit();
+    if (d.mode === "move") editor.commit();
     else if (d.object)
       editor.change((room) => {
+        if (["carve", "fill"].includes(d.mode)) {
+          paintGeometry(room, d.mode, d.object.x, d.object.y, d.object.width, d.object.height);
+          editor.selected=null;
+          return;
+        }
         const o = { ...d.object, id: uid() };
-        room[
-          { carve: "geometry_operations", fill: "geometry_operations", platform: "platforms" }[
-            d.mode
-          ]
-        ].push(o);
+        room.platforms.push(o);
         editor.selected = o.id;
       });
   });
@@ -1269,7 +1305,8 @@ const settingLabels = {
   export_scale: "PNG scale (1× / 2× / 4×)",
 };
 const hints = {
-  select: "Select · drag to move · bottom-right handle to resize",
+  paint: "Click a cell or drag a rectangle to paint",
+  select: "Select a marker · drag to move · use Copy Area / Move for cells",
   area: "Drag a grid rectangle to copy its cells and markers; doors stay fixed",
   move: "Click to move the selected area to its top-left · Escape to cancel",
   paste: "Click to place the copy at its top-left · repeat to stamp · Escape to cancel",
@@ -1281,7 +1318,7 @@ const hints = {
   platform: "Drag horizontally to create a one-way platform",
   hazard: "Click to place a hazard marker",
   annotation: "Click to place a text annotation",
-  erase: "Click an object to delete",
+  erase: "Click a marker to delete · otherwise click/drag to paint cells black",
 };
 let restored = null;
 try {
@@ -1297,7 +1334,8 @@ const editor = {
   clipboard: null,
   areaSelection: null,
   moveSelection: null,
-  tool: "select",
+  tool: "paint",
+  paintSwapped: false,
   dirty: restored?.dirty ?? false,
   view: { scale: 20, x: 30, y: 50 },
   message(text) {
@@ -1354,6 +1392,7 @@ const editor = {
     }
   },
   commit() {
+    finalizeGeometry(this.room);
     if (this.history.commit(this.room)) {
       this.dirty = true;
       this.persist();
@@ -1449,6 +1488,11 @@ const editor = {
     }
   },
   setTool(tool) {
+    // C/F select the left paint color; the opposite color stays on right-click.
+    if (["carve", "fill"].includes(tool)) {
+      this.paintSwapped = tool === "carve";
+      tool = "paint";
+    }
     if (tool === "move" && !this.areaSelection) {
       this.message("Choose Copy Area and drag a selection first, then click Move.");
       return;
@@ -1475,10 +1519,19 @@ const editor = {
       b.classList.toggle("active", b.dataset.tool === tool);
       b.setAttribute("aria-pressed", b.dataset.tool === tool);
     });
-    $("tool-hint").textContent = hints[tool];
+    this.paintControls();
     $("canvas").style.cursor = tool === "select" ? "default" : "crosshair";
     if (tool === "move") this.render();
     this.refreshPaste?.();
+  },
+  paintControls() {
+    const left=this.paintSwapped ? "Carve white" : "Fill black";
+    const right=this.paintSwapped ? "Fill black" : "Carve white";
+    $("paint-buttons").textContent = `Left: ${left} · Right: ${right}`;
+    $("swap-paint").setAttribute("aria-pressed", String(this.paintSwapped));
+    $("tool-hint").textContent = this.tool === "paint"
+      ? `${left} with left-click · ${right} with right-click · drag for a rectangle`
+      : hints[this.tool];
   },
   fit() {
     const r = $("canvas").getBoundingClientRect(),
@@ -1499,14 +1552,14 @@ const editor = {
     this.room = room;
     this.clipboard = null;
     this.areaSelection = null;
-    this.tool = "select";
+    this.tool = "paint";
     this.history = new History(room);
     this.selected = null;
     this.dirty = dirty;
     this.persist();
     this.render();
     this.fit();
-    this.setTool("select");
+    this.setTool("paint");
   },
   panels() {
     document.querySelector('[data-tool="paste"]').disabled = !this.clipboard;
@@ -1532,7 +1585,7 @@ const editor = {
     $("door-width").value = this.room.door_contract.width_world_units ?? "";
     $("door-anchor").value = this.room.door_contract.anchor_convention ?? "";
     $("object-picker").innerHTML =
-      '<option value="">Choose an object…</option>' +
+      '<option value="">Choose a marker…</option>' +
       objects(this.room)
         .map(
           ({ object: o }) =>
@@ -1544,12 +1597,10 @@ const editor = {
     )?.object;
     $("delete").disabled = $("duplicate").disabled = !o;
     if (!o) {
-      $("selection").innerHTML = "<p>Select geometry or a marker.</p>";
+      $("selection").innerHTML = "<p>Select a marker. Paint cells directly, or use Copy Area / Move.</p>";
       return;
     }
     const keys = {
-      carve: ["x", "y", "width", "height"],
-      fill: ["x", "y", "width", "height"],
       door: ["y", "marker_width"],
       enemy: ["x", "y", "label"],
       platform: ["x", "y", "length"],
@@ -1572,7 +1623,7 @@ const editor = {
             throw Error("Dimensions must be positive.");
           target[k] = value;
         }
-        if (["carve", "fill", "platform"].includes(target.type)) {
+        if (target.type === "platform") {
           const step = room.settings.grid_step;
           for (const key of ["x", "y", "length", "width", "height"])
             if (
@@ -1609,17 +1660,22 @@ $("object-picker").onchange = (e) => {
 };
 const toolGroups = [
   ["EDIT", ["select", "area", "paste", "move", "erase"]],
-  ["GEOMETRY", ["carve", "fill", "platform"]],
+  ["GEOMETRY", ["paint", "platform"]],
   ["OBJECTS", ["entry", "exit", "enemy", "hazard", "annotation"]],
 ];
 $("tools").innerHTML = toolGroups.map(([heading, ids]) => `<section class="tool-group"><h2>${heading}</h2><div class="tool-grid">${ids.map(id => {
   const [, label, key] = toolList.find(t => t[0] === id);
   return `<button data-tool="${id}" title="${label} (${key})"><span>${label}</span><span class="tool-shortcut">${key}</span></button>`;
-}).join("")}${heading === "EDIT" ? '<button id="delete">Delete</button>' : ""}</div></section>`).join("");
+}).join("")}${heading === "EDIT" ? '<button id="delete">Delete</button>' : heading === "GEOMETRY" ? '<button id="swap-paint" aria-pressed="false" title="Swap the left and right paint colors">Swap left / right</button>' : ""}</div></section>`).join("");
 document
   .querySelectorAll("[data-tool]")
   .forEach((b) => (b.onclick = () => editor.setTool(b.dataset.tool)));
 installTools(editor);
+$("swap-paint").onclick = () => {
+  editor.cancel?.();
+  editor.paintSwapped = !editor.paintSwapped;
+  editor.setTool("paint");
+};
 function guard() {
   return (
     !editor.dirty ||
@@ -1756,7 +1812,7 @@ window.addEventListener("beforeunload", (e) => {
   }
 });
 editor.render();
-editor.setTool("select");
+editor.setTool("paint");
 requestAnimationFrame(() => editor.fit());
 if (restored) editor.message("Last autosave restored automatically.");
 
